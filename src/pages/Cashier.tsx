@@ -15,7 +15,9 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { InvoiceModal } from '../components/cashier/InvoiceModal';
 import { useApp } from '../contexts/AppContext';
-import { useMetrics } from '../hooks/useMetrics';
+import { useAuth } from '../contexts/AuthContext';
+import { Modal } from '../components/ui/Modal';
+import { Field, inputClass } from '../components/ui/Field';
 import { formatVnd } from '../utils/format';
 import {
   LINE_LABEL,
@@ -35,9 +37,10 @@ const METHODS: {id: PaymentMethod;icon: React.ComponentType<{className?: string;
 
 
 export function Cashier() {
-  const { orders, dishes, tableOf, payOrder, completeDirectSale, showToast } = useApp();
-  const m = useMetrics();
+  const { orders, dishes, tableOf, payOrder, completeDirectSale, showToast, cashierShifts, openCashierShift, closeCashierShift } = useApp();
+  const { user } = useAuth();
   const [screen, setScreen] = useState<'payment' | 'available'>('payment');
+  const [salesDate, setSalesDate] = useState(() => new Date().toLocaleDateString('en-CA'));
 
   const open = orders.
   filter((o) => o.status === 'OPEN' && submittedLines(o).length > 0).
@@ -52,6 +55,8 @@ export function Cashier() {
   const [cash, setCash] = useState('');
   const [invoice, setInvoice] = useState<Order | null>(null);
   const [provisional, setProvisional] = useState<Order | null>(null);
+  const [openingCash,setOpeningCash]=useState(''); const [openingNote,setOpeningNote]=useState(''); const [actualCash,setActualCash]=useState(''); const [varianceReason,setVarianceReason]=useState(''); const [shiftError,setShiftError]=useState(''); const [closeOpen,setCloseOpen]=useState(false);
+  const activeShift=cashierShifts.find(s=>s.cashier===user?.name&&s.status==='OPEN');
 
   const selected = open.find((o) => o.id === selectedId) ?? open[0];
 
@@ -61,7 +66,14 @@ export function Cashier() {
     setMethod('Tiền mặt');
   }, [selected?.id]);
 
-  const shiftRevenue = m.paidOrders.reduce((s, o) => s + o.total, 0);
+  const cashierSales = orders.filter((o) =>
+    o.status === 'PAID' && o.paidBy === user?.name && o.paidAt?.slice(0, 10) === salesDate
+  );
+  const shiftRevenue = cashierSales.reduce((s, o) => s + o.total, 0);
+  const shiftCash = cashierSales.filter((o) => o.paymentMethod === 'Tiền mặt').reduce((s, o) => s + o.total, 0);
+  const shiftTransfer = cashierSales.filter((o) => o.paymentMethod === 'Chuyển khoản').reduce((s, o) => s + o.total, 0);
+  const shiftCard = cashierSales.filter((o) => o.paymentMethod === 'Thẻ').reduce((s, o) => s + o.total, 0);
+  const expectedCash=(activeShift?.openingCash??0)+shiftCash;
 
   const lines = selected ? submittedLines(selected) : [];
   const totals = orderTotals(lines, discountRate);
@@ -88,25 +100,31 @@ export function Cashier() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {!activeShift ? <div className="m-auto w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-card"><h2 className="text-xl font-bold">Mở ca thu ngân</h2><p className="mt-1 text-sm text-slate-500">Nhập số tiền mặt thực tế trong két. Cần mở ca trước khi thanh toán.</p><div className="mt-4 space-y-3"><Field label="Tiền mặt đầu ca"><input className={inputClass} type="number" min="0" value={openingCash} onChange={e=>setOpeningCash(e.target.value)}/></Field><Field label="Ghi chú"><textarea className={inputClass} value={openingNote} onChange={e=>setOpeningNote(e.target.value)}/></Field>{shiftError&&<p className="text-sm text-red-600">{shiftError}</p>}<Button onClick={()=>{const err=openCashierShift(Number(openingCash),openingNote);setShiftError(err??'');}}>Xác nhận mở ca</Button></div></div> : <>
       <div className="flex flex-wrap items-center gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 lg:gap-6">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-slate-900">Thu ngân</h1>
           <p className="text-xs text-slate-500">Thanh toán sẽ tự động trừ định lượng nguyên liệu theo công thức</p>
         </div>
-        <dl className="ml-auto flex w-full justify-between gap-3 text-sm sm:w-auto sm:justify-start sm:gap-6 lg:gap-8">
+        <div className="ml-auto flex w-full flex-wrap items-center justify-between gap-3 sm:w-auto sm:justify-start">
+          <label className="text-xs text-slate-500">Ngày ca<input aria-label="Ngày ca cần xem" type="date" value={salesDate} onChange={(e) => setSalesDate(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800" /></label>
+          <dl className="flex w-full justify-between gap-3 text-sm sm:w-auto sm:gap-6 lg:gap-8">
           <div>
-            <dt className="text-xs text-slate-500">Doanh thu ca</dt>
+            <dt className="text-xs text-slate-500">Doanh số ca · {user?.name}</dt>
             <dd className="tabular font-semibold text-slate-900">{formatVnd(shiftRevenue)}</dd>
           </div>
           <div>
             <dt className="text-xs text-slate-500">Hóa đơn đã thu</dt>
-            <dd className="tabular font-semibold text-slate-900">{m.paidOrders.length}</dd>
+            <dd className="tabular font-semibold text-slate-900">{cashierSales.length}</dd>
           </div>
           <div>
             <dt className="text-xs text-slate-500">Bàn đang mở</dt>
             <dd className="tabular font-semibold text-slate-900">{open.length}</dd>
           </div>
-        </dl>
+          </dl>
+          <div className="w-full text-xs text-slate-500">Ca {activeShift.id} · Đầu ca {formatVnd(activeShift.openingCash)} · Tiền mặt {formatVnd(shiftCash)} · Chuyển khoản {formatVnd(shiftTransfer)} · Thẻ {formatVnd(shiftCard)} · Dự kiến trong két {formatVnd(expectedCash)}</div>
+        </div>
+        <Button variant="warning" onClick={()=>setCloseOpen(true)}>Chốt ca</Button>
         <Link to="/invoices">
           <Button variant="secondary">
             <ScrollTextIcon className="h-4 w-4" />
@@ -373,6 +391,10 @@ export function Cashier() {
 
       <InvoiceModal order={invoice} title="Thanh toán thành công" onClose={() => setInvoice(null)} />
       <InvoiceModal order={provisional} provisional onClose={() => setProvisional(null)} />
+      <Modal open={closeOpen} onClose={()=>setCloseOpen(false)} title="Chốt ca thu ngân" description={`Ca ${activeShift.id} · Mở lúc ${new Date(activeShift.openedAt).toLocaleString('vi-VN')}`} footer={<><Button variant="secondary" onClick={()=>setCloseOpen(false)}>Hủy</Button><Button onClick={()=>{const err=closeCashierShift(activeShift.id,Number(actualCash),varianceReason,{cash:shiftCash,transfer:shiftTransfer,other:shiftCard});setShiftError(err??'');if(!err)setCloseOpen(false);}}>Xác nhận chốt ca</Button></>}>
+        <div className="space-y-3 text-sm"><p>Thu ngân: <strong>{user?.name}</strong></p><p>Tiền mặt đầu ca: <strong>{formatVnd(activeShift.openingCash)}</strong></p><p>Doanh thu tiền mặt: <strong>{formatVnd(shiftCash)}</strong></p><p>Chuyển khoản: {formatVnd(shiftTransfer)} · Phương thức khác: {formatVnd(shiftCard)}</p><p>Tiền mặt dự kiến cuối ca: <strong>{formatVnd(expectedCash)}</strong></p><Field label="Tiền mặt thực tế kiểm đếm"><input className={inputClass} type="number" min="0" value={actualCash} onChange={e=>setActualCash(e.target.value)}/></Field><p>Chênh lệch: {formatVnd((Number(actualCash)||0)-expectedCash)}</p><Field label="Lý do chênh lệch (bắt buộc nếu khác 0)"><textarea className={inputClass} value={varianceReason} onChange={e=>setVarianceReason(e.target.value)}/></Field>{shiftError&&<p className="text-red-600">{shiftError}</p>}</div>
+      </Modal>
+      </>}
     </div>);
 
 }

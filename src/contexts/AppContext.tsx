@@ -15,6 +15,10 @@ import type {
   Order,
   OrderLine,
   PaymentMethod,
+  PurchaseRequest,
+  PurchaseRequestStatus,
+  StocktakeRecord,
+  CashierShift,
   ReportKind,
   ReportRecord,
   ReportStockLine,
@@ -58,6 +62,16 @@ interface AppState {
   suppliers: Supplier[];
   orders: Order[];
   transactions: StockTx[];
+  purchaseRequests: PurchaseRequest[];
+  processPurchaseRequest: (id: string, status: Exclude<PurchaseRequestStatus, 'PENDING'>, reason?: string) => string | null;
+  createPurchaseRequest: (request: Omit<PurchaseRequest, 'id'|'requestedAt'|'requester'|'department'|'status'|'history'>) => string | null;
+  stocktakes: StocktakeRecord[];
+  createStocktake: (record: Omit<StocktakeRecord,'id'|'createdAt'|'createdBy'|'department'|'status'|'history'>) => string | null;
+  saveStocktakeDraft: (record: Omit<StocktakeRecord,'id'|'createdAt'|'createdBy'|'department'|'status'|'history'>, id?: string) => string | null;
+  cashierShifts: CashierShift[];
+  openCashierShift: (openingCash: number, note: string) => string | null;
+  closeCashierShift: (shiftId: string, actualCash: number, reason: string, sales: {cash: number;transfer: number;other: number}) => string | null;
+  processCashierShift: (shiftId: string, status: 'ACCOUNTING_RECEIVED'|'REVIEW', note: string) => string | null;
   reports: ReportRecord[];
   areas: Area[];
   tables: DiningTable[];
@@ -122,6 +136,12 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
   const [dishes, setDishes] = useState<Dish[]>(seedDishes);
   const [orders, setOrders] = useState<Order[]>(seedOrders);
   const [transactions, setTransactions] = useState<StockTx[]>(initialTx);
+  const [purchaseRequests, setPurchaseRequests] = useState<PurchaseRequest[]>(() => {
+    try { return JSON.parse(window.localStorage.getItem('bepkho.purchaseRequests') || '[]') as PurchaseRequest[]; }
+    catch { return []; }
+  });
+  const [stocktakes, setStocktakes] = useState<StocktakeRecord[]>(() => { try { return JSON.parse(window.localStorage.getItem('bepkho.stocktakes') || '[]') as StocktakeRecord[]; } catch { return []; } });
+  const [cashierShifts,setCashierShifts]=useState<CashierShift[]>(()=>{try{return JSON.parse(window.localStorage.getItem('bepkho.cashierShifts')||'[]') as CashierShift[]}catch{return[]}});
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [areas, setAreas] = useState<Area[]>(seedAreas);
   const [tables, setTables] = useState<DiningTable[]>(seedTables);
@@ -136,6 +156,70 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 3200);
   }, []);
+
+  const processPurchaseRequest = useCallback((id: string, status: Exclude<PurchaseRequestStatus, 'PENDING'>, reason = '') => {
+    if (!user) return 'Vui lòng đăng nhập';
+    if ((status === 'REJECTED' || status === 'REVISION_REQUESTED') && !reason.trim()) return 'Vui lòng nhập lý do';
+    const request = purchaseRequests.find((item) => item.id === id);
+    if (!request) return 'Không tìm thấy đề nghị';
+    const managerAction = status === 'MANAGER_APPROVED' || (status === 'REJECTED' || status === 'REVISION_REQUESTED') && request.status === 'PENDING';
+    if (managerAction && (user.role !== 'Quản lý' || request.requester === user.name)) return 'Chỉ quản lý khác người lập mới được phê duyệt hoặc từ chối phiếu';
+    if (!managerAction && user.role !== 'Kế toán') return 'Chỉ kế toán được tiếp nhận và xử lý nghiệp vụ ngân sách';
+    if (status === 'ACCOUNTING_PENDING' && request.status !== 'MANAGER_APPROVED') return 'Phiếu phải được quản lý phê duyệt trước';
+    if (status === 'COMPLETED' && request.status !== 'ACCOUNTING_PENDING') return 'Kế toán cần tiếp nhận phiếu trước khi hoàn tất';
+    if (status === 'APPROVED' && request.status !== 'ACCOUNTING_PENDING') return 'Chỉ tiếp nhận phiếu đã được quản lý phê duyệt';
+    if ((status === 'REJECTED' || status === 'REVISION_REQUESTED') && !['PENDING','MANAGER_APPROVED','ACCOUNTING_PENDING'].includes(request.status)) return 'Phiếu không ở trạng thái có thể xử lý';
+    if (status === 'REJECTED' && request.requester === user.name && user.role === 'Quản lý') return 'Người lập không được tự phê duyệt phiếu';
+    const updated = purchaseRequests.map((item) => item.id !== id ? item : {
+      ...item, status, history: [...item.history, {
+        id: `AP-${Date.now()}`, actor: user.name, at: new Date().toISOString(),
+        from: item.status, to: status,
+        action: status === 'MANAGER_APPROVED' ? 'Quản lý phê duyệt' : status === 'ACCOUNTING_PENDING' ? 'Chuyển kế toán xử lý' : status === 'COMPLETED' ? 'Hoàn tất xử lý' : status === 'APPROVED' ? 'Duyệt ngân sách' : status === 'REJECTED' ? 'Từ chối' : 'Yêu cầu chỉnh sửa',
+        reason: reason.trim() || undefined
+      }]
+    });
+    setPurchaseRequests(updated);
+    window.localStorage.setItem('bepkho.purchaseRequests', JSON.stringify(updated));
+    showToast(status === 'MANAGER_APPROVED' ? 'Đã phê duyệt đề nghị và chuyển kế toán' : status === 'REJECTED' ? 'Đã từ chối đề nghị' : status === 'ACCOUNTING_PENDING' ? 'Đã chuyển đề nghị đến kế toán' : status === 'COMPLETED' ? 'Đã hoàn tất đề nghị' : status === 'APPROVED' ? 'Đã duyệt ngân sách đề nghị' : 'Đã gửi yêu cầu chỉnh sửa');
+    return null;
+  }, [purchaseRequests, user, showToast]);
+
+  const createPurchaseRequest = useCallback((draft: Omit<PurchaseRequest,'id'|'requestedAt'|'requester'|'department'|'status'|'history'>) => {
+    if (!user || user.role !== 'Nhân viên kho') return 'Chỉ nhân viên kho được lập đề nghị';
+    if (!draft.reason.trim() || !draft.lines.length || draft.lines.some(l => !l.ingredientId || l.quantity <= 0 || l.unitCost < 0)) return 'Vui lòng nhập nội dung và hàng hóa hợp lệ';
+    const now = new Date().toISOString(); const request: PurchaseRequest = { ...draft, id: `DN-${Date.now()}`, requestedAt: now, requester: user.name, department: 'Kho', status: 'PENDING', history: [{id:`EV-${Date.now()}`,actor:user.name,at:now,from:'PENDING',to:'PENDING',action:'Gửi đề nghị đến quản lý'}] };
+    const next=[request,...purchaseRequests]; setPurchaseRequests(next); window.localStorage.setItem('bepkho.purchaseRequests',JSON.stringify(next)); showToast('Đã gửi đề nghị nhập kho đến quản lý nhà hàng'); return null;
+  }, [user,purchaseRequests,showToast]);
+
+  const saveStocktakeDraft = useCallback((draft: Omit<StocktakeRecord,'id'|'createdAt'|'createdBy'|'department'|'status'|'history'>,id?:string) => {
+    if(!user||user.role!=='Nhân viên kho')return 'Chỉ nhân viên kho được lưu nháp kiểm kê';const now=new Date().toISOString();const current=id?stocktakes.find(x=>x.id===id&&x.status==='DRAFT'):undefined;const record:StocktakeRecord={...draft,id:current?.id??id??`KK-${Date.now()}`,createdAt:current?.createdAt??now,createdBy:current?.createdBy??user.name,department:'Kho',status:'DRAFT',history:current?.history??[{actor:user.name,at:now,action:'Lưu bản nháp'}]};const next=current?stocktakes.map(x=>x.id===record.id?record:x):[record,...stocktakes];setStocktakes(next);window.localStorage.setItem('bepkho.stocktakes',JSON.stringify(next));showToast('Đã lưu bản nháp kiểm kê');return record.id;
+  },[user,stocktakes,showToast]);
+  const createStocktake = useCallback((draft: Omit<StocktakeRecord,'id'|'createdAt'|'createdBy'|'department'|'status'|'history'>) => {
+    if (!user || user.role !== 'Nhân viên kho') return 'Chỉ nhân viên kho được lập biên bản kiểm kê';
+    if (!draft.lines.length || draft.lines.some(l=>l.countedQty<0)) return 'Số lượng kiểm kê không hợp lệ';
+    const now=new Date().toISOString(); const record:StocktakeRecord={...draft,id:`KK-${Date.now()}`,createdAt:now,createdBy:user.name,department:'Kho',status:'PENDING_MANAGER',history:[{actor:user.name,at:now,action:'Gửi biên bản đến quản lý'}]};
+    const next=[record,...stocktakes]; setStocktakes(next); window.localStorage.setItem('bepkho.stocktakes',JSON.stringify(next)); showToast('Đã gửi biên bản kiểm kê đến quản lý; tồn kho chưa điều chỉnh'); return null;
+  },[user,stocktakes,showToast]);
+
+  const openCashierShift=useCallback((openingCash:number,note:string)=>{
+    if(!user||user.role!=='Thu ngân')return 'Chỉ thu ngân được mở ca';
+    if(!Number.isFinite(openingCash)||openingCash<0)return 'Tiền mặt đầu ca không hợp lệ';
+    if(cashierShifts.some(s=>s.cashier===user.name&&s.status==='OPEN'))return 'Bạn đã có ca đang hoạt động';
+    const shift:CashierShift={id:`CA-${Date.now()}`,cashier:user.name,openedAt:new Date().toISOString(),openingCash,note:note.trim(),status:'OPEN'};
+    const next=[shift,...cashierShifts];setCashierShifts(next);window.localStorage.setItem('bepkho.cashierShifts',JSON.stringify(next));showToast(`Đã mở ca ${shift.id}`);return null;
+  },[user,cashierShifts,showToast]);
+
+  const closeCashierShift=useCallback((shiftId:string,actualCash:number,reason:string,sales:{cash:number;transfer:number;other:number})=>{
+    if(!user||user.role!=='Thu ngân')return 'Chỉ thu ngân được chốt ca';
+    const shift=cashierShifts.find(s=>s.id===shiftId&&s.cashier===user.name&&s.status==='OPEN');if(!shift)return 'Không tìm thấy ca đang mở';
+    const expected=shift.openingCash+sales.cash;const variance=actualCash-expected;if(!Number.isFinite(actualCash)||actualCash<0)return 'Tiền kiểm đếm không hợp lệ';if(variance!==0&&!reason.trim())return 'Bắt buộc nhập lý do chênh lệch';
+    const next=cashierShifts.map(s=>s.id!==shiftId?s:{...s,status:'CLOSED' as const,closedAt:new Date().toISOString(),cashSales:sales.cash,transferSales:sales.transfer,otherSales:sales.other,expectedCash:expected,actualCash,variance,varianceReason:reason.trim()});setCashierShifts(next);window.localStorage.setItem('bepkho.cashierShifts',JSON.stringify(next));showToast('Đã chốt ca và chuyển báo cáo đến kế toán');return null;
+  },[user,cashierShifts,showToast]);
+
+  const processCashierShift=useCallback((shiftId:string,status:'ACCOUNTING_RECEIVED'|'REVIEW',note:string)=>{
+    if(!user||user.role!=='Kế toán')return 'Chỉ kế toán được xử lý báo cáo chốt ca';if(status==='REVIEW'&&!note.trim())return 'Nhập ghi chú yêu cầu kiểm tra lại';
+    const shift=cashierShifts.find(s=>s.id===shiftId&&s.status!=='OPEN');if(!shift)return 'Không tìm thấy ca đã chốt';const next=cashierShifts.map(s=>s.id===shiftId?{...s,status,accountingNote:note.trim()}:s);setCashierShifts(next);window.localStorage.setItem('bepkho.cashierShifts',JSON.stringify(next));showToast(status==='ACCOUNTING_RECEIVED'?'Đã tiếp nhận báo cáo chốt ca':'Đã yêu cầu kiểm tra lại');return null;
+  },[user,cashierShifts,showToast]);
 
   const ingredientOf = useCallback(
     (id: string) => ingredients.find((i) => i.id === id)!,
@@ -705,6 +789,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
     opts: {discountRate: number;method: PaymentMethod;cashReceived?: number;}) =>
     {
       if (!hasRole('Thu ngân')) return null;
+      if (!cashierShifts.some((shift) => shift.cashier === userName && shift.status === 'OPEN')) { showToast('Mở ca thu ngân trước khi thanh toán'); return null; }
       const order = orders.find((o) => o.id === orderId);
       if (!order || order.status !== 'OPEN' || paymentLocks.current.has(orderId) || !isReadyToPay(order)) return null;
       if (opts.discountRate < 0 || opts.discountRate > 15) return null;
@@ -758,12 +843,12 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
       setOrders((prev) => prev.map((o) => o.id === orderId ? paidOrder : o));
       return paidOrder;
     },
-    [orders, dishes, batches, ingredients, userName, hasRole, showToast]
+    [orders, dishes, batches, ingredients, userName, hasRole, showToast, cashierShifts]
   );
 
   const value = useMemo<AppState>(
     () => ({
-      ingredients, batches, dishes, suppliers, orders, transactions, reports, areas, tables,
+      ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
       dailyStats, baseline: baselineToday, dishSold, userName, toast, showToast,
       receiveStock, disposeBatch, recordWaste, saveIngredient, createReport, toggleSpecial, saveDish, deleteDish,
       saveRecipe, saveArea, deleteArea, saveTable, deleteTable, openOrderOf, addLine,
@@ -771,7 +856,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
       ingredientOf, dishOf, tableOf
     }),
     [
-    ingredients, batches, dishes, suppliers, orders, transactions, reports, areas, tables,
+    ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
     dishSold, userName, toast, showToast, receiveStock, disposeBatch, recordWaste, saveIngredient, createReport,
     toggleSpecial, saveDish, deleteDish, saveRecipe, saveArea, deleteArea, saveTable,
     deleteTable, openOrderOf, addLine, updateLine, removeLine, submitOrder,

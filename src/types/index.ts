@@ -227,7 +227,33 @@ export interface ReportStockLine {
   varianceQty?: number;
 }
 
-export type Role = 'Quản lý' | 'Nhân viên kho' | 'Phục vụ' | 'Bếp' | 'Thu ngân';
+export type Role = 'Admin' | 'Quản lý' | 'Nhân viên kho' | 'Phục vụ' | 'Bếp' | 'Thu ngân' | 'Kế toán';
+
+export type PurchaseRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'REVISION_REQUESTED' | 'MANAGER_APPROVED' | 'ACCOUNTING_PENDING' | 'ACCOUNTING_RECEIVED' | 'COMPLETED' | 'DRAFT';
+export interface PurchaseRequestLine { ingredientId: string; quantity: number; unitCost: number; }
+export interface PurchaseApprovalEvent {
+  id: string; actor: string; at: string; from: PurchaseRequestStatus;
+  to: PurchaseRequestStatus; action: string; reason?: string;
+}
+export interface PurchaseRequest {
+  id: string; requestedAt: string; requester: string; department: string;
+  lines: PurchaseRequestLine[]; reason: string; note?: string;
+  status: PurchaseRequestStatus; history: PurchaseApprovalEvent[];
+}
+
+export interface StocktakeRecord {
+  id: string; createdAt: string; createdBy: string; department: string;
+  lines: { ingredientId: string; bookQty: number; countedQty: number; goodQty?: number; poorQty?: number; lostQty?: number; note?: string }[];
+  note: string; status: 'DRAFT'|'PENDING_MANAGER' | 'REVIEWED'; history: { actor: string; at: string; action: string; note?: string }[];
+}
+
+export interface CashierShift {
+  id: string; cashier: string; openedAt: string; openingCash: number; note?: string;
+  status: 'OPEN'|'CLOSED'|'ACCOUNTING_RECEIVED'|'REVIEW'; closedAt?: string;
+  cashSales?: number; transferSales?: number; otherSales?: number; otherIncome?: number;
+  cashExpense?: number; expectedCash?: number; actualCash?: number; variance?: number; varianceReason?: string;
+  accountingNote?: string;
+}
 
 export interface Account {
   username: string;

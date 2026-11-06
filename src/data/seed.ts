@@ -298,11 +298,13 @@ export const tables: DiningTable[] = [
 
 
 export const accounts: Account[] = [
+{ username: 'admin', password: '123456', name: 'Quản trị hệ thống', role: 'Admin' },
 { username: 'quanly', password: '123456', name: 'Nguyễn Minh Quân', role: 'Quản lý' },
 { username: 'bep', password: '123456', name: 'Lê Văn Bếp', role: 'Bếp' },
 { username: 'phucvu', password: '123456', name: 'Phạm Thu Hà', role: 'Phục vụ' },
 { username: 'thungan', password: '123456', name: 'Võ Ngọc Lan', role: 'Thu ngân' },
-{ username: 'kho', password: '123456', name: 'Trần Văn Kho', role: 'Nhân viên kho' }];
+{ username: 'kho', password: '123456', name: 'Trần Văn Kho', role: 'Nhân viên kho' },
+{ username: 'ketoan', password: '123456', name: 'Nguyễn Thu Trang', role: 'Kế toán' }];
 
 
 type L = OrderLine;

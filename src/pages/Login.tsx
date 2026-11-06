@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChefHatIcon,
+  ClipboardCheckIcon,
   ClipboardListIcon,
   EyeIcon,
   EyeOffIcon,
@@ -13,7 +14,7 @@ import {
 import { Button } from '../components/ui/Button';
 import { Field, inputClass } from '../components/ui/Field';
 import { ROLE_HOME, useAuth } from '../contexts/AuthContext';
-import { accounts } from '../data/seed';
+import { readAdminAccounts } from './Admin';
 import type { Role } from '../types';
 
 const ROLE_INFO: Record<
@@ -21,13 +22,16 @@ const ROLE_INFO: Record<
   {icon: React.ComponentType<{className?: string;}>;desc: string;}> =
 {
   'Quản lý': { icon: ShieldCheckIcon, desc: 'Món ăn, bàn, báo cáo, tồn kho' },
+  Admin: { icon: ShieldCheckIcon, desc: 'Tài khoản và lịch sử đăng nhập' },
   'Phục vụ': { icon: LayoutGridIcon, desc: 'Sơ đồ bàn, gọi món' },
   Bếp: { icon: ChefHatIcon, desc: 'Chế biến, công thức, hao hụt' },
   'Thu ngân': { icon: WalletIcon, desc: 'Thanh toán, hóa đơn' },
-  'Nhân viên kho': { icon: PackageIcon, desc: 'Nhập hàng, lô, hạn dùng' }
+  'Nhân viên kho': { icon: PackageIcon, desc: 'Nhập hàng, lô, hạn dùng' },
+  'Kế toán': { icon: ClipboardCheckIcon, desc: 'Duyệt ngân sách, báo cáo' }
 };
 
 export function Login() {
+  const accounts = readAdminAccounts();
   const { login } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');

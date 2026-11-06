@@ -25,6 +25,11 @@ import { Finance } from './pages/Finance';
 import { Reports } from './pages/Reports';
 import { History } from './pages/History';
 import { Settings } from './pages/Settings';
+import { Accountant } from './pages/Accountant';
+import { AdminAccounts, LoginHistory } from './pages/Admin';
+import { OrderStatus } from './pages/OrderStatus';
+import { PurchaseRequests, Stocktake } from './pages/WarehouseForms';
+import { Attendance } from './pages/Attendance';
 
 const ROUTES: {path: string;guard: string;element: React.ReactNode;}[] = [
 { path: '/', guard: '/', element: <Dashboard /> },
@@ -47,6 +52,21 @@ const ROUTES: {path: string;guard: string;element: React.ReactNode;}[] = [
 { path: '/reports', guard: '/reports', element: <Reports /> },
 { path: '/history', guard: '/history', element: <History /> },
 { path: '/settings', guard: '/settings', element: <Settings /> }];
+ROUTES.push(
+{ path: '/admin/accounts', guard: '/admin/accounts', element: <AdminAccounts /> },
+{ path: '/admin/logins', guard: '/admin/logins', element: <LoginHistory /> },
+{ path: '/order-status', guard: '/order-status', element: <OrderStatus /> }
+,{ path: '/warehouse/requests', guard: '/warehouse/requests', element: <PurchaseRequests /> },
+{ path: '/warehouse/stocktake', guard: '/warehouse/stocktake', element: <Stocktake /> }
+);
+ROUTES.push(
+{ path: '/accountant', guard: '/accountant', element: <Accountant initialTab="overview" /> },
+{ path: '/accountant/requests', guard: '/accountant/requests', element: <Accountant initialTab="requests" /> },
+{ path: '/manager/requests', guard: '/manager/requests', element: <Accountant initialTab="requests" /> },
+{ path: '/manager/attendance', guard: '/manager/attendance', element: <Attendance /> },
+{ path: '/accountant/reconciliation', guard: '/accountant/reconciliation', element: <Accountant initialTab="reconciliation" /> },
+{ path: '/accountant/reports', guard: '/accountant/reports', element: <Accountant initialTab="reports" /> }
+);
 
 
 function AppRoutes() {
