@@ -333,6 +333,48 @@ method: Order['paymentMethod'], cost: number)
   };
 };
 
+const demoHistoricalOrders: Order[] = (() => {
+  const now = new Date();
+  const catalog = [
+    { id: 'DISH-01', name: 'Bò ba chỉ nướng', price: 150_000, cost: 58_000 },
+    { id: 'DISH-02', name: 'Bò lúc lắc', price: 185_000, cost: 72_000 },
+    { id: 'DISH-04', name: 'Lẩu bò', price: 320_000, cost: 145_000 },
+    { id: 'DISH-05', name: 'Tôm nướng muối ớt', price: 220_000, cost: 96_000 },
+    { id: 'DISH-06', name: 'Tôm hấp bia', price: 240_000, cost: 105_000 },
+    { id: 'DISH-10', name: 'Nước ngọt lon', price: 25_000, cost: 9_000 }
+  ];
+  const methods: NonNullable<Order['paymentMethod']>[] = ['Tiền mặt', 'Chuyển khoản', 'Thẻ'];
+  const result: Order[] = [];
+  for (let monthOffset = 3; monthOffset >= 1; monthOffset -= 1) {
+    const monthDate = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1);
+    const days = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
+    for (let sale = 0; sale < 12; sale += 1) {
+      const day = 2 + (sale * 2) % Math.max(3, days - 2);
+      const soldAt = new Date(monthDate.getFullYear(), monthDate.getMonth(), day, 11 + sale % 9, (sale * 13) % 60);
+      const a = catalog[(sale + monthOffset) % catalog.length];
+      const b = catalog[(sale + monthOffset + 3) % catalog.length];
+      const lines: OrderLine[] = [a, b].map((dish, index) => ({
+        lineId: `DEMO-${monthOffset}-${sale}-${index}`, dishId: dish.id, name: dish.name,
+        price: dish.price, qty: 1 + ((sale + index) % 2), status: 'READY'
+      }));
+      const subtotal = lines.reduce((sum, line) => sum + line.price * line.qty, 0);
+      const discountRate = sale % 4 === 0 ? 5 : 0;
+      const discount = Math.round(subtotal * discountRate / 100);
+      const vat = Math.round((subtotal - discount) * 0.08);
+      result.push({
+        id: `HD-DEMO-${monthDate.getFullYear()}${String(monthDate.getMonth() + 1).padStart(2, '0')}-${String(sale + 1).padStart(2, '0')}`,
+        tableId: `T-${String(sale % 12 + 1).padStart(2, '0')}`, lines, status: 'PAID',
+        createdAt: new Date(soldAt.getTime() - 35 * 60_000).toISOString(), createdBy: 'Nhân viên phục vụ demo',
+        paidAt: soldAt.toISOString(), paidBy: 'Thu ngân demo', paymentMethod: methods[sale % methods.length],
+        demo: true,
+        subtotal, discountRate, discount, vat, total: subtotal - discount + vat,
+        cost: lines.reduce((sum, line) => sum + (line.dishId === a.id ? a.cost : b.cost) * line.qty, 0)
+      });
+    }
+  }
+  return result;
+})();
+
 export const seedOrders: Order[] = [
 {
   id: 'HD-1052', tableId: 'T-02', status: 'OPEN', createdAt: iso(0, 12, 5), createdBy: 'Phạm Thu Hà',
@@ -373,7 +415,7 @@ line('L-94', 'DISH-11', 'Nước suối', 15_000, 6, 'READY', 90)],
 paid('HD-1051', 'T-01', 12, 10, [
 line('L-95', 'DISH-02', 'Bò lúc lắc', 185_000, 2, 'READY', 60),
 line('L-96', 'DISH-07', 'Salad cà chua xà lách', 75_000, 1, 'READY', 60)],
-'Thẻ', 168_000)];
+'Thẻ', 168_000), ...demoHistoricalOrders];
 
 
 /** Số liệu đã chốt từ đầu ca hôm nay (các đơn trước khi mở phần mềm) */

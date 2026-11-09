@@ -19,6 +19,8 @@ import type {
   PurchaseRequestStatus,
   StocktakeRecord,
   CashierShift,
+  CashLedger,
+  CashVoucher,
   ReportKind,
   ReportRecord,
   ReportStockLine,
@@ -69,6 +71,8 @@ interface AppState {
   createStocktake: (record: Omit<StocktakeRecord,'id'|'createdAt'|'createdBy'|'department'|'status'|'history'>) => string | null;
   saveStocktakeDraft: (record: Omit<StocktakeRecord,'id'|'createdAt'|'createdBy'|'department'|'status'|'history'>, id?: string) => string | null;
   cashierShifts: CashierShift[];
+  cashLedger: CashLedger;
+  createCashVoucher: (draft: Omit<CashVoucher, 'id'|'createdBy'|'createdAt'|'status'>) => string | null;
   openCashierShift: (openingCash: number, note: string) => string | null;
   closeCashierShift: (shiftId: string, actualCash: number, reason: string, sales: {cash: number;transfer: number;other: number}) => string | null;
   processCashierShift: (shiftId: string, status: 'ACCOUNTING_RECEIVED'|'REVIEW', note: string) => string | null;
@@ -121,6 +125,33 @@ interface AppState {
 
 const Ctx = createContext<AppState | null>(null);
 
+const CASH_LEDGER_KEY = 'bepkho.cashLedger.v1';
+const makeDemoCashLedger = (): CashLedger => {
+  const now = new Date();
+  const vouchers: CashVoucher[] = [];
+  for (let offset = 3; offset >= 1; offset -= 1) {
+    const d = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    const month = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const date = (day: number) => `${month}-${String(day).padStart(2,'0')}T12:00:00.000Z`;
+    const base = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}`;
+    vouchers.push(
+      { id:`PT-DEMO-${base}`, type:'RECEIPT', date:date(8), partyType:'Khách hàng', partyName:'Khách đặt tiệc (demo)', category:'Thu dịch vụ', reason:'Thu phí dịch vụ tiệc', description:'Khoản thu độc lập, không gắn hóa đơn bán hàng', amount:1_500_000, method:'Chuyển khoản', bankAccount:'VCB-Demo', createdBy:'Nguyễn Thu Trang', createdAt:date(8), status:'Đã xác nhận', accountingTreatment:'INCOME', demo:true },
+      { id:`PC-DEMO-${base}-01`, type:'PAYMENT', date:date(12), partyType:'Khác', partyName:'Điện lực (demo)', category:'Chi phí điện, nước, gas', reason:'Thanh toán tiền điện', description:'Chi phí vận hành demo', amount:1_200_000, method:'Chuyển khoản', bankAccount:'VCB-Demo', createdBy:'Nguyễn Thu Trang', createdAt:date(12), status:'Đã xác nhận', accountingTreatment:'EXPENSE', demo:true },
+      { id:`PC-DEMO-${base}-02`, type:'PAYMENT', date:date(20), partyType:'Nhân viên', partyName:'Nhân viên nhà hàng (demo)', category:'Chi phí lương nhân viên', reason:'Chi lương kỳ demo', description:'Phiếu chi demo; chưa liên kết bảng lương', amount:2_000_000, method:'Tiền mặt', createdBy:'Nguyễn Thu Trang', createdAt:date(20), status:'Đã xác nhận', accountingTreatment:'CASH_ONLY', demo:true }
+    );
+  }
+  return { vouchers, openingCash:20_000_000, openingBank:100_000_000, bankAccountName:'Tài khoản demo · VCB', closedPeriods:[] };
+};
+function readCashLedger(): CashLedger {
+  const demo = makeDemoCashLedger();
+  try {
+    const stored = window.localStorage.getItem(CASH_LEDGER_KEY);
+    if (!stored) { window.localStorage.setItem(CASH_LEDGER_KEY, JSON.stringify(demo)); return demo; }
+    const parsed = JSON.parse(stored) as Partial<CashLedger>;
+    return { ...demo, ...parsed, vouchers: Array.isArray(parsed.vouchers) ? parsed.vouchers : demo.vouchers, closedPeriods: Array.isArray(parsed.closedPeriods) ? parsed.closedPeriods : [] };
+  } catch { return demo; }
+}
+
 let counter = 100;
 const uid = (prefix: string) => `${prefix}-${++counter}`;
 let orderSeq = 1055;
@@ -142,6 +173,8 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
   });
   const [stocktakes, setStocktakes] = useState<StocktakeRecord[]>(() => { try { return JSON.parse(window.localStorage.getItem('bepkho.stocktakes') || '[]') as StocktakeRecord[]; } catch { return []; } });
   const [cashierShifts,setCashierShifts]=useState<CashierShift[]>(()=>{try{return JSON.parse(window.localStorage.getItem('bepkho.cashierShifts')||'[]') as CashierShift[]}catch{return[]}});
+  const [cashLedger, setCashLedger] = useState<CashLedger>(readCashLedger);
+  const cashLedgerRef = useRef(cashLedger);
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [areas, setAreas] = useState<Area[]>(seedAreas);
   const [tables, setTables] = useState<DiningTable[]>(seedTables);
@@ -156,6 +189,30 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 3200);
   }, []);
+
+  const createCashVoucher = useCallback((draft: Omit<CashVoucher, 'id'|'createdBy'|'createdAt'|'status'>) => {
+    if (!user || user.role !== 'Kế toán') return 'Chỉ kế toán được lập phiếu thu, chi';
+    if (!Number.isFinite(draft.amount) || draft.amount <= 0) return 'Số tiền phải lớn hơn 0';
+    if (!draft.date || Number.isNaN(new Date(draft.date).getTime())) return 'Ngày lập phiếu không hợp lệ';
+    if (!draft.method || (draft.method === 'Chuyển khoản' && !draft.bankAccount)) return 'Vui lòng chọn phương thức và tài khoản ngân hàng';
+    const period = draft.date.slice(0,7);
+    const ledger = cashLedgerRef.current;
+    if (ledger.closedPeriods.includes(period)) return 'Kỳ kế toán đã khóa sổ';
+    const balance = draft.method === 'Tiền mặt'
+      ? ledger.openingCash + ledger.vouchers.filter(v=>v.method==='Tiền mặt').reduce((sum,v)=>sum+(v.type==='RECEIPT'?v.amount:-v.amount),0)
+      : ledger.openingBank + ledger.vouchers.filter(v=>v.method==='Chuyển khoản'&&v.bankAccount===draft.bankAccount).reduce((sum,v)=>sum+(v.type==='RECEIPT'?v.amount:-v.amount),0);
+    if (draft.type === 'PAYMENT' && draft.amount > balance) return `Số dư ${draft.method.toLowerCase()} không đủ (${Math.round(balance).toLocaleString('vi-VN')} ₫)`;
+    const now = new Date().toISOString();
+    const id = `${draft.type==='RECEIPT'?'PT':'PC'}-${Date.now()}-${++counter}`;
+    const voucher: CashVoucher = { ...draft, id, createdBy:user.name, createdAt:now, status:'Đã xác nhận' };
+    const next: CashLedger = { ...ledger, vouchers:[voucher,...ledger.vouchers] };
+    try { window.localStorage.setItem(CASH_LEDGER_KEY, JSON.stringify(next)); }
+    catch { return 'Không lưu được phiếu vào bộ nhớ trình duyệt'; }
+    cashLedgerRef.current = next;
+    setCashLedger(next);
+    showToast(`Đã lưu ${draft.type==='RECEIPT'?'phiếu thu':'phiếu chi'} ${voucher.id}`);
+    return null;
+  }, [user, showToast]);
 
   const processPurchaseRequest = useCallback((id: string, status: Exclude<PurchaseRequestStatus, 'PENDING'>, reason = '') => {
     if (!user) return 'Vui lòng đăng nhập';
@@ -848,7 +905,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
 
   const value = useMemo<AppState>(
     () => ({
-      ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
+      ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
       dailyStats, baseline: baselineToday, dishSold, userName, toast, showToast,
       receiveStock, disposeBatch, recordWaste, saveIngredient, createReport, toggleSpecial, saveDish, deleteDish,
       saveRecipe, saveArea, deleteArea, saveTable, deleteTable, openOrderOf, addLine,
@@ -856,7 +913,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
       ingredientOf, dishOf, tableOf
     }),
     [
-    ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
+    ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
     dishSold, userName, toast, showToast, receiveStock, disposeBatch, recordWaste, saveIngredient, createReport,
     toggleSpecial, saveDish, deleteDish, saveRecipe, saveArea, deleteArea, saveTable,
     deleteTable, openOrderOf, addLine, updateLine, removeLine, submitOrder,

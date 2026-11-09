@@ -149,6 +149,8 @@ export type PaymentMethod = 'Tiền mặt' | 'Chuyển khoản' | 'Thẻ';
 
 export interface Order {
   id: string;
+  /** Đánh dấu chứng từ được tạo từ seed demo, không phải giao dịch thực tế. */
+  demo?: boolean;
   tableId: string;
   lines: OrderLine[];
   status: OrderStatus;
@@ -253,6 +255,37 @@ export interface CashierShift {
   cashSales?: number; transferSales?: number; otherSales?: number; otherIncome?: number;
   cashExpense?: number; expectedCash?: number; actualCash?: number; variance?: number; varianceReason?: string;
   accountingNote?: string;
+}
+
+export type CashVoucherType = 'RECEIPT' | 'PAYMENT';
+export type CashVoucherMethod = 'Tiền mặt' | 'Chuyển khoản';
+export type CashVoucherPartyType = 'Khách hàng' | 'Nhà cung cấp' | 'Nhân viên' | 'Khác';
+export interface CashVoucher {
+  id: string;
+  type: CashVoucherType;
+  date: string;
+  partyType: CashVoucherPartyType;
+  partyName: string;
+  category: string;
+  reason: string;
+  description: string;
+  amount: number;
+  method: CashVoucherMethod;
+  bankAccount?: string;
+  attachment?: string;
+  accountingTreatment: 'INCOME' | 'EXPENSE' | 'CASH_ONLY';
+  createdBy: string;
+  createdAt: string;
+  status: 'Đã xác nhận';
+  demo?: boolean;
+}
+
+export interface CashLedger {
+  vouchers: CashVoucher[];
+  openingCash: number;
+  openingBank: number;
+  bankAccountName: string;
+  closedPeriods: string[];
 }
 
 export interface Account {

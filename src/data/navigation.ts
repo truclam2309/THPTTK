@@ -14,6 +14,7 @@ import {
   PackageIcon,
   PackagePlusIcon,
   ReceiptTextIcon,
+  SearchIcon,
   ScrollTextIcon,
   SettingsIcon,
   TimerIcon,
@@ -81,6 +82,10 @@ export const navGroups: {title: string;items: NavItem[];}[] = [
   title: 'Tài chính',
   items: [
   { to: '/accountant', label: 'Tổng quan kế toán', icon: ClipboardCheckIcon, roles: [KT] },
+  { to: '/accountant/revenue', label: 'Theo dõi doanh thu', icon: ReceiptTextIcon, roles: [KT] },
+  { to: '/accountant/cash-vouchers', label: 'Phiếu thu, chi', icon: ReceiptTextIcon, roles: [KT] },
+  { to: '/accountant/costs', label: 'Theo dõi chi phí', icon: CoinsIcon, roles: [KT] },
+  { to: '/accountant/lookup', label: 'Tra cứu doanh thu, chi phí', icon: SearchIcon, roles: [KT] },
   { to: '/accountant/requests', label: 'Duyệt đề nghị', icon: PackagePlusIcon, roles: [KT] },
   { to: '/manager/requests', label: 'Phê duyệt đề nghị nhập kho', icon: PackagePlusIcon, roles: [QL] },
   { to: '/manager/attendance', label: 'Chấm công', icon: ClipboardCheckIcon, roles: [QL] },
@@ -116,6 +121,10 @@ export const routeRoles: Record<string, Role[]> = {
   '/manager/attendance': [QL],
   '/accountant/reconciliation': [KT],
   '/accountant/reports': [KT]
+  ,'/accountant/revenue': [KT]
+  ,'/accountant/cash-vouchers': [KT]
+  ,'/accountant/costs': [KT]
+  ,'/accountant/lookup': [KT]
   ,'/admin/accounts': [ADMIN],
   '/admin/logins': [ADMIN],
   '/order-status': [PV],

@@ -71,6 +71,32 @@ button { -webkit-tap-highlight-color: transparent; }
 .request-form-table th,.stocktake-form-table th { text-align: center; font-weight: 700; }
 .print-only { display: none; }
 @page { size: A4 landscape; margin: 12mm; }
+@page voucher { size: A4 portrait; margin: 10mm; }
+.voucher-print { page: voucher; box-sizing: border-box; width: min(100%, 820px); margin: 0 auto; padding: 34px 42px; border: 1px solid #d8dee8; border-radius: 10px; background: #fff; color: #172033; box-shadow: 0 12px 35px rgba(15,23,42,.08); font-family: 'Times New Roman', Times, serif; font-size: 14px; line-height: 1.45; }
+.voucher-top { display: grid; grid-template-columns: minmax(0,1fr) 230px; gap: 24px; align-items: start; }
+.voucher-company,.voucher-reference { display: flex; flex-direction: column; }
+.voucher-company strong { font-size: 15px; letter-spacing: .04em; }
+.voucher-company span,.voucher-reference span { color: #475569; font-size: 12px; }
+.voucher-reference { text-align: right; gap: 2px; }
+.voucher-reference > strong { font-size: 14px; }
+.voucher-title { margin: 22px 0 26px; text-align: center; }
+.voucher-title h2 { margin: 0; font-family: 'Times New Roman', Times, serif; font-size: 27px; font-weight: 700; letter-spacing: .12em; }
+.voucher-title p { margin: 4px 0 0; color: #475569; font-style: italic; }
+.voucher-details { display: grid; gap: 3px; }
+.voucher-line { display: grid; grid-template-columns: 185px minmax(0,1fr); gap: 12px; align-items: baseline; min-height: 29px; padding: 5px 0; border-bottom: 1px dotted #cbd5e1; }
+.voucher-line > span:first-child { color: #475569; }
+.voucher-line > :last-child { overflow-wrap: anywhere; }
+.voucher-amount { margin-top: 5px; border-bottom-style: solid; border-color: #94a3b8; }
+.voucher-amount strong { font-size: 18px; }
+.voucher-sign-date { margin: 28px 0 0; text-align: right; font-style: italic; }
+.voucher-signatures { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; margin-top: 9px; text-align: center; font-size: 11px; line-height: 1.25; }
+.voucher-signatures > div { display: flex; min-width: 0; flex-direction: column; align-items: center; }
+.voucher-signatures strong { font-size: 10px; }
+.voucher-signatures em { margin-top: 3px; color: #64748b; font-size: 10px; }
+.voucher-sign-space { display: block; height: 74px; }
+.voucher-signatures b { font-size: 10px; }
+.voucher-received { margin-top: 16px; padding: 9px 0 5px; border-top: 1px dotted #64748b; font-size: 13px; }
+.voucher-foot { display: flex; justify-content: space-between; margin-top: 10px; color: #94a3b8; font-size: 10px; }
 @media print {
   body * { visibility: hidden !important; }
   .print-form,.print-form * { visibility: visible !important; }
@@ -81,4 +107,30 @@ button { -webkit-tap-highlight-color: transparent; }
   .print-form select { display: none !important; }
   .print-only { display: inline !important; }
   .no-print { display: none !important; }
+  html, body, #root { height: auto !important; min-height: 0 !important; margin: 0 !important; overflow: visible !important; }
+  .fixed.inset-0:has(.voucher-print) { position: static !important; inset: auto !important; display: block !important; width: 100% !important; height: auto !important; min-height: 0 !important; padding: 0 !important; overflow: visible !important; }
+  .fixed.inset-0:has(.voucher-print) > div:not([role="dialog"]) { display: none !important; }
+  .fixed.inset-0:has(.voucher-print) [role="dialog"] { position: static !important; inset: auto !important; width: 100% !important; max-width: none !important; height: auto !important; max-height: none !important; overflow: visible !important; transform: none !important; border-radius: 0 !important; box-shadow: none !important; }
+  .fixed.inset-0:has(.voucher-print) [role="dialog"] > div { height: auto !important; max-height: none !important; padding: 0 !important; overflow: visible !important; }
+  .voucher-print, .voucher-print * { visibility: visible !important; }
+  .voucher-print { position: absolute !important; inset: 0 auto auto 0 !important; display: block !important; width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; overflow: visible !important; color: #111 !important; font-family: Arial, Helvetica, sans-serif !important; font-size: 9pt !important; line-height: 1.35 !important; break-inside: avoid-page !important; page-break-inside: avoid !important; }
+  .voucher-top { grid-template-columns: minmax(0,1fr) 62mm; gap: 5mm; }
+  .voucher-company strong,.voucher-reference > strong { font-size: 10pt; }
+  .voucher-company span,.voucher-reference span { font-size: 8pt; }
+  .voucher-title { margin: 3mm 0 8mm; }
+  .voucher-title h2 { font-family: Arial, Helvetica, sans-serif; font-size: 13pt; letter-spacing: 0; }
+  .voucher-title p { margin-top: 1mm; color: #111; }
+  .voucher-details { gap: 0; }
+  .voucher-line { grid-template-columns: 48mm minmax(0,1fr); gap: 3mm; min-height: 7mm; padding: 1.3mm 0; border-bottom: 0; }
+  .voucher-line > span:first-child,.voucher-company span,.voucher-reference span { color: #111; }
+  .voucher-amount { margin-top: 2mm; border-top: 1px solid #555; border-bottom: 1px solid #555; }
+  .voucher-amount strong { font-size: 11pt; }
+  .voucher-sign-date { margin-top: 9mm; }
+  .voucher-print .voucher-signatures { margin-top: 2mm !important; font-size: 7.5pt !important; line-height: 1.2 !important; }
+  .voucher-signatures strong,.voucher-signatures b { font-size: 7.5pt; }
+  .voucher-signatures em { font-size: 7pt; }
+  .voucher-print .voucher-sign-space { height: 23mm !important; }
+  .voucher-received { margin-top: 5mm; padding-top: 2mm; }
+  .voucher-print p { margin-top: 1mm !important; margin-bottom: 1mm !important; }
+  .voucher-print,.voucher-print * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

@@ -35,6 +35,7 @@ export function InvoiceReceipt({
         <p className="mt-2 text-sm font-bold">
           {provisional ? 'PHIẾU TẠM TÍNH' : 'HÓA ĐƠN THANH TOÁN'}
         </p>
+        {order.demo && <p className="mt-1 text-[10px] font-bold tracking-widest text-slate-500">CHỨNG TỪ DEMO</p>}
       </div>
       <div className="mt-2 border-t border-dashed border-slate-400 pt-2">
         <p>Số: {order.id}</p>

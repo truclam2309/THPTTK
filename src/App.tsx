@@ -66,6 +66,10 @@ ROUTES.push(
 { path: '/manager/attendance', guard: '/manager/attendance', element: <Attendance /> },
 { path: '/accountant/reconciliation', guard: '/accountant/reconciliation', element: <Accountant initialTab="reconciliation" /> },
 { path: '/accountant/reports', guard: '/accountant/reports', element: <Accountant initialTab="reports" /> }
+,{ path: '/accountant/lookup', guard: '/accountant/lookup', element: <Accountant initialTab="lookup" /> }
+,{ path: '/accountant/revenue', guard: '/accountant/revenue', element: <Accountant initialTab="revenue" /> }
+,{ path: '/accountant/cash-vouchers', guard: '/accountant/cash-vouchers', element: <Accountant initialTab="vouchers" /> }
+,{ path: '/accountant/costs', guard: '/accountant/costs', element: <Accountant initialTab="lookup" /> }
 );
 
 
