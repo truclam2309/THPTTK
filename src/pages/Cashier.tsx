@@ -36,7 +36,7 @@ const METHODS: {id: PaymentMethod;icon: React.ComponentType<{className?: string;
 
 
 export function Cashier() {
-  const { orders, dishes, tableOf, areas, tables, payOrder, completeDirectSale, showToast, cashierShifts, openCashierShift, closeCashierShift } = useApp();
+  const { orders, dishes, tableOf, areas, tables, payOrder, completeDirectSale, showToast, cashierShifts, openCashierShift, closeCashierShift, customers, saveCustomer } = useApp();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -57,6 +57,9 @@ export function Cashier() {
   const [paidNow, setPaidNow] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail,setCustomerEmail]=useState('');
+  const [customerAddress,setCustomerAddress]=useState('');
+  const [customerMessage,setCustomerMessage]=useState('');
   const [method, setMethod] = useState<PaymentMethod>('Tiền mặt');
   const [cash, setCash] = useState('');
   const [invoice, setInvoice] = useState<Order | null>(null);
@@ -73,6 +76,10 @@ export function Cashier() {
   };
 
   const selected = open.find((o) => o.id === selectedId) ?? open[0];
+  const normalizedCustomerPhone=customerPhone.replace(/\D/g,'');
+  const matchedCustomer=customers.find(customer=>customer.phone.replace(/\D/g,'')===normalizedCustomerPhone&&normalizedCustomerPhone.length>0);
+  const changeCustomerPhone=(phone:string)=>{setCustomerPhone(phone);setCustomerMessage('');const key=phone.replace(/\D/g,'');const match=customers.find(customer=>customer.phone.replace(/\D/g,'')===key&&key.length>0);if(match){setCustomerName(match.name);setCustomerEmail(match.email??'');setCustomerAddress(match.address??'');}else{setCustomerName('');setCustomerEmail('');setCustomerAddress('');}};
+  const registerCustomer=()=>{const result=saveCustomer({name:customerName,phone:customerPhone,email:customerEmail,address:customerAddress});setCustomerMessage(result??'Đã lưu hồ sơ khách hàng.');};
 
   useEffect(() => {
     setDiscountRate(0);
@@ -82,6 +89,9 @@ export function Cashier() {
     setPaidNow('');
     setCustomerName('');
     setCustomerPhone('');
+    setCustomerEmail('');
+    setCustomerAddress('');
+    setCustomerMessage('');
   }, [selected?.id]);
 
   const cashierSales = activeShift ? orders.filter((order) =>
@@ -108,6 +118,7 @@ export function Cashier() {
 
   const pay = () => {
     if (!selected) return;
+    if(customerPhone.trim()&&!matchedCustomer){if(!customerName.trim()){setCustomerMessage('Nhập tên khách hàng để tạo hồ sơ theo số điện thoại này.');return;}const customerError=saveCustomer({name:customerName,phone:customerPhone,email:customerEmail,address:customerAddress});if(customerError){setCustomerMessage(customerError);return;}}
     const paid = payOrder(selected.id, {
       discountRate,
       method,
@@ -312,6 +323,14 @@ export function Cashier() {
                   </div>
                 </dl>
 
+                <section className="rounded-lg border border-slate-200 p-3">
+                  <h3 className="mb-2 text-sm font-semibold text-slate-800">Thông tin khách hàng (không bắt buộc)</h3>
+                  <label className="block text-xs font-medium text-slate-600">Số điện thoại<input className={inputClass+' mt-1'} value={customerPhone} onChange={event=>changeCustomerPhone(event.target.value)} placeholder="Nhập số điện thoại để tra cứu" /></label>
+                  {matchedCustomer?<div className="mt-2 rounded-md bg-emerald-50 p-2 text-xs text-emerald-800"><strong>Đã tìm thấy khách hàng: {matchedCustomer.name}</strong>{matchedCustomer.email&&<p>{matchedCustomer.email}</p>}{matchedCustomer.address&&<p>{matchedCustomer.address}</p>}</div>:customerPhone.trim()&&<div className="mt-2 grid gap-2"><p className="text-xs text-amber-700">Chưa có hồ sơ theo số điện thoại này. Nhập thông tin để tạo khách hàng mới.</p><label className="text-xs font-medium text-slate-600">Tên khách hàng *<input className={inputClass+' mt-1'} value={customerName} onChange={event=>setCustomerName(event.target.value)} placeholder="Họ và tên"/></label><label className="text-xs font-medium text-slate-600">Email<input className={inputClass+' mt-1'} type="email" value={customerEmail} onChange={event=>setCustomerEmail(event.target.value)} placeholder="Không bắt buộc"/></label><label className="text-xs font-medium text-slate-600">Địa chỉ<input className={inputClass+' mt-1'} value={customerAddress} onChange={event=>setCustomerAddress(event.target.value)} placeholder="Không bắt buộc"/></label><Button size="sm" variant="secondary" onClick={registerCustomer}>Lưu hồ sơ khách hàng</Button></div>}
+                  {customerMessage&&<p role="status" className="mt-2 text-xs text-slate-600">{customerMessage}</p>}
+                </section>
+                {allowDebt&&amountToCollect<totals.total&&!customerPhone.trim()&&<label className="block text-xs font-medium text-slate-600">Tên khách hàng ghi nợ *<input className={inputClass+' mt-1'} value={customerName} onChange={event=>setCustomerName(event.target.value)} placeholder="Nhập tên khách hàng"/></label>}
+
                 <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
                   <input type="checkbox" checked={allowDebt} onChange={(event) => { setAllowDebt(event.target.checked); setPaidNow(event.target.checked ? String(totals.total) : ''); }} className="mt-0.5 accent-amber-600" />
                   <span><strong className="block text-amber-900">Ghi nợ / thanh toán một phần</strong><span className="mt-0.5 block text-xs leading-5 text-amber-800">Bill vẫn được xác nhận; số còn thiếu sẽ tự tạo công nợ gắn với mã hóa đơn.</span></span>
@@ -322,7 +341,7 @@ export function Cashier() {
                   <input id="paid-now" type="number" min="0" max={totals.total} step="1000" value={paidNow} onChange={(event) => setPaidNow(event.target.value)} className={inputClass + ' text-right font-semibold'} />
                   {!amountValid && <p className="mt-1 text-xs text-red-600">Số tiền thu không được vượt tổng bill.</p>}
                   {amountValid && <p className="mt-1 flex justify-between text-xs text-amber-800"><span>Ghi công nợ</span><strong>{formatVnd(totals.total - amountToCollect)}</strong></p>}
-                  {amountToCollect < totals.total && <div className="mt-3 grid gap-2 sm:grid-cols-2"><label className="text-xs font-medium text-slate-600">Tên khách hàng *<input className={inputClass + ' mt-1'} value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Nhập tên người nợ" /></label><label className="text-xs font-medium text-slate-600">Số điện thoại<input className={inputClass + ' mt-1'} value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} placeholder="Không bắt buộc" /></label></div>}
+                  {amountToCollect < totals.total && <p className="mt-3 text-xs text-slate-600">Công nợ sẽ gắn với hồ sơ khách hàng và số điện thoại đã nhập ở trên.</p>}
                 </div>}
 
                 <div>

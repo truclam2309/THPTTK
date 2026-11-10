@@ -22,6 +22,7 @@ import {
   Trash2Icon,
   TrendingUpIcon,
   TruckIcon,
+  UsersIcon,
   UtensilsCrossedIcon,
   WalletIcon } from
 'lucide-react';
@@ -70,15 +71,21 @@ export const navGroups: {title: string;items: NavItem[];}[] = [
   title: 'Kho nguyên liệu',
   items: [
   { to: '/inventory', label: 'Tồn kho', icon: PackageIcon, roles: [KHO] },
+  { to: '/warehouse/forecast', label: 'Dự báo & đề xuất nhập', icon: TrendingUpIcon, roles: [KHO] },
   { to: '/warehouse/requests', label: 'Đề nghị nhập kho', icon: PackagePlusIcon, roles: [KHO] },
   { to: '/warehouse/stocktake', label: 'Biên bản kiểm kê', icon: ClipboardCheckIcon, roles: [KHO] },
   { to: '/receive', label: 'Nhập hàng', icon: PackagePlusIcon, roles: [KHO] },
   { to: '/batches', label: 'Lô hàng', icon: BoxesIcon, roles: [KHO] },
   { to: '/expiry', label: 'Hạn sử dụng', icon: TimerIcon, roles: [KHO], badge: 'nearExpiry' },
   { to: '/expired', label: 'Hàng hết hạn', icon: AlertTriangleIcon, roles: [KHO], badge: 'expired' },
-  { to: '/disposal', label: 'Hủy / Hao hụt', icon: Trash2Icon, roles: [KHO] },
-  { to: '/suppliers', label: 'Nhà cung cấp', icon: TruckIcon, roles: [KHO] }]
+  { to: '/disposal', label: 'Hủy / Hao hụt', icon: Trash2Icon, roles: [KHO] }]
 
+},
+{
+  title: 'Quản lý nhà hàng',
+  items: [
+  { to: '/suppliers', label: 'Nhà cung cấp', icon: TruckIcon, roles: [QL] },
+  { to: '/manager/customers', label: 'Quản lý khách hàng', icon: UsersIcon, roles: [QL] }]
 },
 {
   title: 'Tài chính',

@@ -29,11 +29,13 @@ import { Accountant } from './pages/Accountant';
 import { AdminAccounts, LoginHistory } from './pages/Admin';
 import { OrderStatus } from './pages/OrderStatus';
 import { PurchaseRequests, Stocktake } from './pages/WarehouseForms';
+import { WarehouseForecast } from './pages/WarehouseForecast';
 import { Attendance } from './pages/Attendance';
 import { Payroll } from './pages/Payroll';
 import { ManagerCashierShifts } from './pages/ManagerCashierShifts';
 import { Debts } from './pages/Debts';
 import { ExpenseTracking } from './pages/ExpenseTracking';
+import { Customers } from './pages/Customers';
 
 const ROUTES: {path: string;guard: string;element: React.ReactNode;}[] = [
 { path: '/', guard: '/', element: <Dashboard /> },
@@ -62,6 +64,7 @@ ROUTES.push(
 { path: '/admin/logins', guard: '/admin/logins', element: <LoginHistory /> },
 { path: '/order-status', guard: '/order-status', element: <OrderStatus /> }
 ,{ path: '/warehouse/requests', guard: '/warehouse/requests', element: <PurchaseRequests /> },
+{ path: '/warehouse/forecast', guard: '/warehouse/forecast', element: <WarehouseForecast /> },
 { path: '/warehouse/stocktake', guard: '/warehouse/stocktake', element: <Stocktake /> }
 );
 ROUTES.push(
@@ -70,6 +73,7 @@ ROUTES.push(
 { path: '/manager/requests', guard: '/manager/requests', element: <Accountant initialTab="requests" /> },
 { path: '/manager/attendance', guard: '/manager/attendance', element: <Attendance /> },
 { path: '/manager/payroll', guard: '/manager/payroll', element: <Payroll /> },
+{ path: '/manager/customers', guard: '/manager/customers', element: <Customers /> },
 { path: '/accountant/payroll', guard: '/accountant/payroll', element: <Payroll /> },
 { path: '/accountant/reconciliation', guard: '/accountant/reconciliation', element: <Accountant initialTab="reconciliation" /> },
 { path: '/accountant/reports', guard: '/accountant/reports', element: <Accountant initialTab="reports" /> }

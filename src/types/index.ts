@@ -27,12 +27,23 @@ export interface Supplier {
   address: string;
 }
 
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  createdAt: string;
+}
+
 export type BatchState = 'FRESH' | 'NEAR_EXPIRY' | 'EXPIRED' | 'CANCELLED';
 
 export interface Batch {
   id: string;
   ingredientId: string;
   barcode: string;
+  /** Mã lô dùng chung cho các mặt hàng cùng nhà cung cấp trong một phiếu nhận. */
+  receiptLotCode?: string;
   supplierId: string;
   /** Số lượng còn lại */
   quantity: number;
@@ -237,8 +248,8 @@ export interface ReportStockLine {
 
 export type Role = 'Admin' | 'Quản lý' | 'Nhân viên kho' | 'Phục vụ' | 'Bếp' | 'Thu ngân' | 'Kế toán';
 
-export type PurchaseRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'REVISION_REQUESTED' | 'MANAGER_APPROVED' | 'ACCOUNTING_PENDING' | 'ACCOUNTING_RECEIVED' | 'COMPLETED' | 'DRAFT';
-export interface PurchaseRequestLine { ingredientId: string; quantity: number; unitCost: number; }
+export type PurchaseRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'REVISION_REQUESTED' | 'MANAGER_APPROVED' | 'ACCOUNTING_PENDING' | 'ACCOUNTING_RECEIVED' | 'COMPLETED' | 'RECEIVED' | 'DRAFT';
+export interface PurchaseRequestLine { ingredientId: string; unit: Unit; quantity: number; unitCost: number; supplierId?: string; }
 export interface PurchaseApprovalEvent {
   id: string; actor: string; at: string; from: PurchaseRequestStatus;
   to: PurchaseRequestStatus; action: string; reason?: string;
@@ -247,6 +258,8 @@ export interface PurchaseRequest {
   id: string; requestedAt: string; requester: string; department: string;
   lines: PurchaseRequestLine[]; reason: string; note?: string;
   status: PurchaseRequestStatus; history: PurchaseApprovalEvent[];
+  receivedAt?: string; receivedBy?: string; receiptSupplierId?: string;
+  receivedLines?: { ingredientId:string; requestedQuantity:number; receivedQuantity:number; unitCost:number; batchId:string }[];
 }
 
 export interface StocktakeRecord {

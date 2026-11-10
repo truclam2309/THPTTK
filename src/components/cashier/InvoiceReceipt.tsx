@@ -48,7 +48,7 @@ export function InvoiceReceipt({
         {order.paidAt && <p>Giờ TT: {formatDateTime(order.paidAt)}</p>}
         <p>Nhân viên phục vụ: {order.createdBy || '—'}</p>
         <p>Thu ngân: {order.paidBy || (provisional ? user?.name : undefined) || '—'}</p>
-        {order.customerName && <p>Khách nợ: {order.customerName}{order.customerPhone ? ` · ${order.customerPhone}` : ''}</p>}
+        {order.customerName && <p>Khách hàng: {order.customerName}{order.customerPhone ? ` · ${order.customerPhone}` : ''}</p>}
       </div>
       <table className="mt-2 w-full border-t border-dashed border-slate-400">
         <thead>

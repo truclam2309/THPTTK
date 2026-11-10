@@ -10,6 +10,7 @@ import React, {
 import type {
   Area,
   Batch,
+  Customer,
   DiningTable,
   Dish,
   Ingredient,
@@ -61,6 +62,9 @@ export interface ReceivePayload {
 }
 
 interface AppState {
+  customers: Customer[];
+  saveCustomer: (customer: Omit<Customer,'id'|'createdAt'> & {id?:string;createdAt?:string}) => string | null;
+  deleteCustomer: (id:string) => string | null;
   ingredients: Ingredient[];
   batches: Batch[];
   dishes: Dish[];
@@ -68,7 +72,9 @@ interface AppState {
   orders: Order[];
   transactions: StockTx[];
   purchaseRequests: PurchaseRequest[];
-  processPurchaseRequest: (id: string, status: Exclude<PurchaseRequestStatus, 'PENDING'>, reason?: string) => string | null;
+  processPurchaseRequest: (id: string, status: Exclude<PurchaseRequestStatus, 'PENDING'|'RECEIVED'>, reason?: string) => string | null;
+  receivePurchaseRequest: (id:string, supplierId:string, receivedAt:string, lines:{lineIndex:number;quantity:number;expiryDate:string;supplierId?:string;barcode?:string;receiptLotCode?:string}[]) => string | null;
+  receiveManual: (supplierId:string, receivedAt:string, receiptLotCode:string, lines:{ingredientId:string;quantity:number;expiryDate:string;unitCost:number;barcode?:string}[]) => string | null;
   createPurchaseRequest: (request: Omit<PurchaseRequest, 'id'|'requestedAt'|'requester'|'department'|'status'|'history'>) => string | null;
   stocktakes: StocktakeRecord[];
   createStocktake: (record: Omit<StocktakeRecord,'id'|'createdAt'|'createdBy'|'department'|'status'|'history'>) => string | null;
@@ -233,8 +239,9 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
   const { user } = useAuth();
   const userName = user?.name ?? 'Hệ thống';
   const hasRole = useCallback((...roles: string[]) => !!user && roles.includes(user.role), [user]);
+  const [customers,setCustomers]=useState<Customer[]>(()=>readStoredRows('bepkho.customers',[]));
 
-  const [ingredients, setIngredients] = useState<Ingredient[]>(seedIngredients);
+  const [ingredients, setIngredients] = useState<Ingredient[]>(() => readStoredRows('bepkho.ingredients', seedIngredients));
   const [suppliers] = useState<Supplier[]>(seedSuppliers);
   const [batches, setBatches] = useState<Batch[]>(() => readStoredRows('bepkho.batches.v1', seedBatches));
   const [dishes, setDishes] = useState<Dish[]>(seedDishes);
@@ -341,7 +348,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
     return null;
   }, [user, debts, showToast]);
 
-  const processPurchaseRequest = useCallback((id: string, status: Exclude<PurchaseRequestStatus, 'PENDING'>, reason = '') => {
+  const processPurchaseRequest = useCallback((id: string, status: Exclude<PurchaseRequestStatus, 'PENDING'|'RECEIVED'>, reason = '') => {
     if (!user) return 'Vui lòng đăng nhập';
     if ((status === 'REJECTED' || status === 'REVISION_REQUESTED') && !reason.trim()) return 'Vui lòng nhập lý do';
     const request = purchaseRequests.find((item) => item.id === id);
@@ -370,10 +377,11 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
 
   const createPurchaseRequest = useCallback((draft: Omit<PurchaseRequest,'id'|'requestedAt'|'requester'|'department'|'status'|'history'>) => {
     if (!user || user.role !== 'Nhân viên kho') return 'Chỉ nhân viên kho được lập đề nghị';
-    if (!draft.reason.trim() || !draft.lines.length || draft.lines.some(l => !l.ingredientId || l.quantity <= 0 || l.unitCost < 0)) return 'Vui lòng nhập nội dung và hàng hóa hợp lệ';
-    const now = new Date().toISOString(); const request: PurchaseRequest = { ...draft, id: `DN-${Date.now()}`, requestedAt: now, requester: user.name, department: 'Kho', status: 'PENDING', history: [{id:`EV-${Date.now()}`,actor:user.name,at:now,from:'PENDING',to:'PENDING',action:'Gửi đề nghị đến quản lý'}] };
+    if (!draft.reason.trim() || !draft.lines.length || draft.lines.some(l => !l.ingredientId || !ingredients.some(item=>item.id===l.ingredientId) || l.quantity <= 0 || l.unitCost < 0)) return 'Vui lòng nhập nội dung và hàng hóa hợp lệ';
+    const lines=draft.lines.map(line=>({...line,unit:ingredients.find(item=>item.id===line.ingredientId)!.unit,supplierId:suppliers.some(supplier=>supplier.id===line.supplierId)?line.supplierId:undefined}));
+    const now = new Date().toISOString(); const request: PurchaseRequest = { ...draft, lines, id: `DN-${Date.now()}`, requestedAt: now, requester: user.name, department: 'Kho', status: 'PENDING', history: [{id:`EV-${Date.now()}`,actor:user.name,at:now,from:'PENDING',to:'PENDING',action:'Gửi đề nghị đến quản lý'}] };
     const next=[request,...purchaseRequests]; setPurchaseRequests(next); window.localStorage.setItem('bepkho.purchaseRequests',JSON.stringify(next)); showToast('Đã gửi đề nghị nhập kho đến quản lý nhà hàng'); return null;
-  }, [user,purchaseRequests,showToast]);
+  }, [user,purchaseRequests,ingredients,suppliers,showToast]);
 
   const saveStocktakeDraft = useCallback((draft: Omit<StocktakeRecord,'id'|'createdAt'|'createdBy'|'department'|'status'|'history'>,id?:string) => {
     if(!user||user.role!=='Nhân viên kho')return 'Chỉ nhân viên kho được lưu nháp kiểm kê';const now=new Date().toISOString();const current=id?stocktakes.find(x=>x.id===id&&x.status==='DRAFT'):undefined;const record:StocktakeRecord={...draft,id:current?.id??id??`KK-${Date.now()}`,createdAt:current?.createdAt??now,createdBy:current?.createdBy??user.name,department:'Kho',status:'DRAFT',history:current?.history??[{actor:user.name,at:now,action:'Lưu bản nháp'}]};const next=current?stocktakes.map(x=>x.id===record.id?record:x):[record,...stocktakes];setStocktakes(next);window.localStorage.setItem('bepkho.stocktakes',JSON.stringify(next));showToast('Đã lưu bản nháp kiểm kê');return record.id;
@@ -463,6 +471,57 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
     [batches, ingredientOf, suppliers, userName, hasRole]
   );
 
+  const receivePurchaseRequest = useCallback((id:string,supplierId:string,receivedAt:string,lines:{lineIndex:number;quantity:number;expiryDate:string;supplierId?:string;barcode?:string;receiptLotCode?:string}[])=>{
+    if(!user||user.role!=='Nhân viên kho')return 'Chỉ nhân viên kho được lập phiếu nhập hàng';
+    const request=purchaseRequests.find(item=>item.id===id);
+    if(!request||request.status!=='COMPLETED')return 'Chỉ được nhập từ đề nghị đã được kế toán duyệt';
+    if(!suppliers.some(supplier=>supplier.id===supplierId)||lines.some(line=>line.supplierId&&!suppliers.some(supplier=>supplier.id===line.supplierId)))return 'Chọn nhà cung cấp hợp lệ';
+    if(!receivedAt||Number.isNaN(Date.parse(receivedAt)))return 'Ngày nhập không hợp lệ';
+    if(lines.length!==request.lines.length||new Set(lines.map(line=>line.lineIndex)).size!==request.lines.length||lines.some(line=>!Number.isInteger(line.lineIndex)||line.lineIndex<0||line.lineIndex>=request.lines.length||!Number.isFinite(line.quantity)||line.quantity<0||!line.expiryDate||Number.isNaN(Date.parse(line.expiryDate))||line.expiryDate<receivedAt))return 'Thông tin số lượng hoặc hạn sử dụng không hợp lệ';
+    if(!lines.some(line=>line.quantity>0))return 'Số lượng thực nhận phải lớn hơn 0';
+    const receivedIso=new Date(`${receivedAt}T12:00:00`).toISOString();
+    const additions:Batch[]=[];const txs:StockTx[]=[];const nextLotByIngredient:Record<string,number>={};const batchIdByLine:Record<number,string>={};
+    lines.forEach(line=>{
+      if(line.quantity===0)return;
+      const requested=request.lines[line.lineIndex];
+      const code=requested.ingredientId.replace('ING-','');
+      const nextNumber=(nextLotByIngredient[requested.ingredientId]??batches.filter(batch=>batch.ingredientId===requested.ingredientId).length)+1;
+      nextLotByIngredient[requested.ingredientId]=nextNumber;
+      const batchId=`LOT-${code}-${String(nextNumber).padStart(3,'0')}`;
+      batchIdByLine[line.lineIndex]=batchId;
+      const rowSupplierId=line.supplierId??requested.supplierId??supplierId;
+      const batch:Batch={id:batchId,ingredientId:requested.ingredientId,barcode:(line.barcode||'').trim()||batchId,receiptLotCode:line.receiptLotCode,supplierId:rowSupplierId,quantity:line.quantity,initialQuantity:line.quantity,receivedAt:receivedIso,mfgDate:receivedIso,expiryDate:new Date(`${line.expiryDate}T12:00:00`).toISOString(),unitCost:requested.unitCost,note:`Nhập theo đề nghị ${request.id}; đề nghị ${requested.quantity}, thực nhận ${line.quantity}`};
+      additions.push(batch);
+      txs.push({id:uid('TX'),at:receivedIso,type:'NHẬP KHO',batchId,ingredientId:requested.ingredientId,qty:line.quantity,unit:ingredientOf(requested.ingredientId).unit,user:user.name,reason:`Nhập theo đề nghị ${request.id} từ ${suppliers.find(supplier=>supplier.id===rowSupplierId)?.name??'NCC'}`,value:line.quantity*requested.unitCost});
+    });
+    const receivedLines=lines.map(line=>({ingredientId:request.lines[line.lineIndex].ingredientId,requestedQuantity:request.lines[line.lineIndex].quantity,receivedQuantity:line.quantity,unitCost:request.lines[line.lineIndex].unitCost,batchId:batchIdByLine[line.lineIndex]??''}));
+    const updated:PurchaseRequest={...request,status:'RECEIVED',receivedAt:receivedIso,receivedBy:user.name,receiptSupplierId:supplierId,receivedLines,history:[...request.history,{id:`RCV-${Date.now()}`,actor:user.name,at:receivedIso,from:request.status,to:'RECEIVED',action:'Lập phiếu nhập kho từ đề nghị đã duyệt'}]};
+    const nextRequests=purchaseRequests.map(item=>item.id===id?updated:item);
+    setBatches([...additions,...batches]);setTransactions([...txs,...transactions]);setPurchaseRequests(nextRequests);
+    window.localStorage.setItem('bepkho.purchaseRequests',JSON.stringify(nextRequests));
+    showToast(`Đã nhập ${additions.length} mặt hàng theo đề nghị ${id}`);
+    return null;
+  },[user,purchaseRequests,suppliers,batches,transactions,ingredientOf,showToast]);
+
+  const receiveManual = useCallback((supplierId:string,receivedAt:string,receiptLotCode:string,lines:{ingredientId:string;quantity:number;expiryDate:string;unitCost:number;barcode?:string}[])=>{
+    if(!user||user.role!=='Nhân viên kho')return 'Chỉ nhân viên kho được lập phiếu nhập hàng';
+    if(!suppliers.some(supplier=>supplier.id===supplierId))return 'Chọn nhà cung cấp hợp lệ';
+    if(!receivedAt||Number.isNaN(Date.parse(receivedAt)))return 'Ngày nhập không hợp lệ';
+    if(!lines.length||lines.some(line=>!ingredients.some(item=>item.id===line.ingredientId)||!Number.isFinite(line.quantity)||line.quantity<=0||!Number.isFinite(line.unitCost)||line.unitCost<0||!line.expiryDate||Number.isNaN(Date.parse(line.expiryDate))||line.expiryDate<receivedAt))return 'Kiểm tra mặt hàng, số lượng, đơn giá và hạn sử dụng';
+    const receivedIso=new Date(`${receivedAt}T12:00:00`).toISOString();
+    const additions:Batch[]=[];const txs:StockTx[]=[];const nextLotByIngredient:Record<string,number>={};
+    lines.forEach(line=>{
+      const code=line.ingredientId.replace('ING-','');
+      const sequence=(nextLotByIngredient[line.ingredientId]??batches.filter(batch=>batch.ingredientId===line.ingredientId).length)+1;
+      nextLotByIngredient[line.ingredientId]=sequence;
+      const batchId=`LOT-${code}-${String(sequence).padStart(3,'0')}`;
+      additions.push({id:batchId,ingredientId:line.ingredientId,barcode:line.barcode?.trim()||batchId,receiptLotCode,supplierId,quantity:line.quantity,initialQuantity:line.quantity,receivedAt:receivedIso,mfgDate:receivedIso,expiryDate:new Date(`${line.expiryDate}T12:00:00`).toISOString(),unitCost:line.unitCost,note:'Nhập kho thủ công, không theo phiếu đề nghị'});
+      txs.push({id:uid('TX'),at:receivedIso,type:'NHẬP KHO',batchId,ingredientId:line.ingredientId,qty:line.quantity,unit:ingredientOf(line.ingredientId).unit,user:user.name,reason:`Nhập kho thủ công từ ${suppliers.find(supplier=>supplier.id===supplierId)?.name??'NCC'}`,value:line.quantity*line.unitCost});
+    });
+    setBatches([...additions,...batches]);setTransactions([...txs,...transactions]);
+    showToast(`Đã nhập kho thủ công ${additions.length} mặt hàng`);return null;
+  },[user,suppliers,ingredients,batches,transactions,ingredientOf,showToast]);
+
   const disposeBatch = useCallback(
     (batchId: string, reason: string, note: string) => {
       if (!hasRole('Nhân viên kho')) return;
@@ -529,11 +588,28 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
     const duplicate = ingredients.some((item) => item.id !== ingredient.id && (item.code || item.id).toLowerCase() === code.toLowerCase());
     if (duplicate) return `Mã sản phẩm ${code} đã tồn tại`;
     const normalized = { ...ingredient, code, name };
-    setIngredients((prev) => prev.some((item) => item.id === normalized.id) ?
-      prev.map((item) => item.id === normalized.id ? normalized : item) : [...prev, normalized]);
+    const next = ingredients.some((item) => item.id === normalized.id) ?
+      ingredients.map((item) => item.id === normalized.id ? normalized : item) : [...ingredients, normalized];
+    setIngredients(next);
+    window.localStorage.setItem('bepkho.ingredients', JSON.stringify(next));
     showToast(`Đã lưu sản phẩm ${code}`);
     return null;
   }, [hasRole, ingredients, showToast]);
+
+  const saveCustomer=useCallback((draft:Omit<Customer,'id'|'createdAt'>&{id?:string;createdAt?:string})=>{
+    if(!user||!['Quản lý','Thu ngân'].includes(user.role))return 'Chỉ quản lý hoặc thu ngân được lưu hồ sơ khách hàng';
+    const name=draft.name.trim();const phone=draft.phone.trim();const normalizedPhone=phone.replace(/\D/g,'');
+    if(!name||normalizedPhone.length<8||normalizedPhone.length>15)return 'Nhập tên và số điện thoại hợp lệ';
+    const duplicate=customers.find(customer=>customer.id!==draft.id&&customer.phone.replace(/\D/g,'')===normalizedPhone);
+    if(duplicate)return `Số điện thoại đã thuộc khách hàng ${duplicate.name}`;
+    const customer:Customer={...draft,id:draft.id??`KH-${Date.now()}`,name,phone,email:draft.email?.trim()||undefined,address:draft.address?.trim()||undefined,createdAt:draft.createdAt??new Date().toISOString()};
+    const next=customers.some(item=>item.id===customer.id)?customers.map(item=>item.id===customer.id?customer:item):[customer,...customers];
+    setCustomers(next);window.localStorage.setItem('bepkho.customers',JSON.stringify(next));showToast(`Đã lưu hồ sơ khách hàng ${customer.name}`);return null;
+  },[user,customers,showToast]);
+  const deleteCustomer=useCallback((id:string)=>{
+    if(!hasRole('Quản lý'))return 'Chỉ quản lý nhà hàng được xóa khách hàng';
+    const next=customers.filter(customer=>customer.id!==id);setCustomers(next);window.localStorage.setItem('bepkho.customers',JSON.stringify(next));showToast('Đã xóa hồ sơ khách hàng');return null;
+  },[hasRole,customers,showToast]);
 
   const createReport = useCallback((kind: ReportKind, periodStart: string, periodEnd: string, countedStock: Record<string, number> = {}) => {
     const allowed = kind === 'REVENUE' ? hasRole('Thu ngân') : hasRole('Nhân viên kho');
@@ -1060,7 +1136,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
 
   const value = useMemo<AppState>(
     () => ({
-      ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, debts, createPayableFromReceipt, settleDebt, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
+      customers, saveCustomer, deleteCustomer, ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, receivePurchaseRequest, receiveManual, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, debts, createPayableFromReceipt, settleDebt, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
       dailyStats, baseline: baselineToday, dishSold, userName, toast, showToast,
       receiveStock, disposeBatch, recordWaste, saveIngredient, createReport, toggleSpecial, saveDish, deleteDish,
       saveRecipe, saveArea, deleteArea, saveTable, deleteTable, openOrderOf, addLine,
@@ -1068,7 +1144,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
       ingredientOf, dishOf, tableOf
     }),
     [
-    ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, debts, createPayableFromReceipt, settleDebt, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
+    customers, saveCustomer, deleteCustomer, ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, receivePurchaseRequest, receiveManual, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, debts, createPayableFromReceipt, settleDebt, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
     dishSold, userName, toast, showToast, receiveStock, disposeBatch, recordWaste, saveIngredient, createReport,
     toggleSpecial, saveDish, deleteDish, saveRecipe, saveArea, deleteArea, saveTable,
     deleteTable, openOrderOf, addLine, updateLine, removeLine, submitOrder,

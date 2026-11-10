@@ -17,14 +17,14 @@ type LedgerRow = { id: string; date: string; type: 'Doanh thu' | 'Chi phí'; gro
 type Period = 'custom' | 'day' | 'week' | 'month' | 'quarter' | 'year';
 const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const csvCell = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
-const STATUS: Record<PurchaseRequestStatus, string> = { PENDING: 'Chờ quản lý duyệt', APPROVED: 'Đã duyệt ngân sách', REJECTED: 'Từ chối', REVISION_REQUESTED: 'Yêu cầu chỉnh sửa', MANAGER_APPROVED: 'Chờ kế toán tiếp nhận', ACCOUNTING_PENDING: 'Kế toán đang xử lý', ACCOUNTING_RECEIVED: 'Kế toán đã tiếp nhận', COMPLETED: 'Đã hoàn tất', DRAFT: 'Bản nháp' };
+const STATUS: Record<PurchaseRequestStatus, string> = { PENDING: 'Chờ quản lý duyệt', APPROVED: 'Đã duyệt ngân sách', REJECTED: 'Từ chối', REVISION_REQUESTED: 'Yêu cầu chỉnh sửa', MANAGER_APPROVED: 'Chờ kế toán tiếp nhận', ACCOUNTING_PENDING: 'Kế toán đang xử lý', ACCOUNTING_RECEIVED: 'Kế toán đã tiếp nhận', COMPLETED: 'Đã duyệt, chờ nhập kho', RECEIVED: 'Đã nhập kho', DRAFT: 'Bản nháp' };
 const total = (r: PurchaseRequest) => r.lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
 
 export function Accountant({ initialTab }: { initialTab: Tab }) {
   const { user } = useAuth();
   const { purchaseRequests, processPurchaseRequest, orders, transactions, ingredients, batches, suppliers, cashierShifts, processCashierShift, cashLedger } = useApp();
   const [selected, setSelected] = useState<PurchaseRequest | null>(null);
-  const [action, setAction] = useState<Exclude<PurchaseRequestStatus, 'PENDING'> | null>(null);
+  const [action, setAction] = useState<Exclude<PurchaseRequestStatus, 'PENDING'|'RECEIVED'> | null>(null);
   const [reason, setReason] = useState('');
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('ALL');

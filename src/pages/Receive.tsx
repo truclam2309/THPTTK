@@ -1,477 +1,125 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import {
-  ArrowRightIcon,
-  CameraIcon,
-  CheckCircle2Icon,
-  PackagePlusIcon,
-  QrCodeIcon,
-  ScanLineIcon,
-  SparklesIcon } from
-'lucide-react';
 import { Card, CardHeader, PageHeader } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Field, inputClass } from '../components/ui/Field';
 import { useApp } from '../contexts/AppContext';
-import { formatQty, formatVnd } from '../utils/format';
+import { formatDateTime, formatQty, formatVnd } from '../utils/format';
 import { availableQty } from '../utils/inventory';
-import type { Batch } from '../types';
+import type { IngredientGroup, Unit } from '../types';
 
-type Step = 'scan' | 'form' | 'done';
-
-const UNKNOWN_BARCODE = '8935009900444';
-
-function toDateInput(d: Date) {
-  return d.toISOString().slice(0, 10);
+function localDate(date:Date) {
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
 
 export function Receive() {
-  const { batches, ingredients, suppliers, receiveStock, ingredientOf } =
-  useApp();
-  const [step, setStep] = useState<Step>('scan');
-  const [scanning, setScanning] = useState(false);
-  const [barcode, setBarcode] = useState('');
-  const [isNew, setIsNew] = useState(false);
-  const [created, setCreated] = useState<Batch | null>(null);
+  const {purchaseRequests,suppliers,batches,ingredients,ingredientOf,receivePurchaseRequest}=useApp();
+  const [manualMode,setManualMode]=useState(false);
+  const eligible=useMemo(()=>purchaseRequests.filter(request=>request.status==='COMPLETED').sort((a,b)=>b.requestedAt.localeCompare(a.requestedAt)),[purchaseRequests]);
+  const [requestId,setRequestId]=useState('');
+  const [supplierId,setSupplierId]=useState(suppliers[0]?.id??'');
+  const [receivedAt,setReceivedAt]=useState(localDate(new Date()));
+  const [quantities,setQuantities]=useState<Record<number,string>>({});
+  const [expiryDates,setExpiryDates]=useState<Record<number,string>>({});
+  const [lineSuppliers,setLineSuppliers]=useState<Record<number,string>>({});
+  const [barcodes,setBarcodes]=useState<Record<number,string>>({});
+  const [scanCode,setScanCode]=useState('');
+  const [scanMessage,setScanMessage]=useState('');
+  const [showScanner,setShowScanner]=useState(false);
+  const [error,setError]=useState('');
+  const [success,setSuccess]=useState('');
+  const request=eligible.find(item=>item.id===requestId);
+  if(manualMode)return <ManualReceipt onBack={()=>setManualMode(false)} />;
 
-  const today = new Date();
-  const [form, setForm] = useState({
-    ingredientId: 'ING-BO',
-    supplierId: 'SUP-01',
-    quantity: '20',
-    unitCost: '280000',
-    receivedAt: toDateInput(today),
-    mfgDate: toDateInput(today),
-    expiryDate: toDateInput(new Date(Date.now() + 3 * 86_400_000)),
-    note: ''
-  });
-
-  const startScan = (code: string) => {
-    setScanning(true);
-    window.setTimeout(() => {
-      const known = batches.find((b) => b.barcode === code);
-      setBarcode(code);
-      setIsNew(!known);
-      if (known) {
-        const ing = ingredientOf(known.ingredientId);
-        setForm((f) => ({
-          ...f,
-          ingredientId: known.ingredientId,
-          supplierId: known.supplierId,
-          unitCost: String(ing.refCost)
-        }));
-      }
-      setScanning(false);
-      setStep('form');
-    }, 1200);
+  const selectRequest=(id:string)=>{
+    setRequestId(id);setError('');setSuccess('');
+    const selected=eligible.find(item=>item.id===id);
+    if(selected){
+      const fallbackExpiry=localDate(new Date(Date.now()+3*86_400_000));
+      setQuantities(Object.fromEntries(selected.lines.map((line,index)=>[index,String(line.quantity)])));
+      setExpiryDates(Object.fromEntries(selected.lines.map((_,index)=>[index,fallbackExpiry])));
+      setLineSuppliers(Object.fromEntries(selected.lines.map((line,index)=>[index,line.supplierId??suppliers[0]?.id??''])));
+      setBarcodes(Object.fromEntries(selected.lines.map((line,index)=>[index,ingredients.find(item=>item.id===line.ingredientId)?.code??''])));
+    }
+  };
+  const scanProduct=(raw=scanCode)=>{const code=raw.trim().toLowerCase();if(!request||!code)return;const index=request.lines.findIndex(line=>{const ingredient=ingredientOf(line.ingredientId);return [ingredient.code,ingredient.id,ingredient.name].some(value=>value?.toLowerCase()===code);});if(index<0){setScanMessage('Mã này chưa có trong đề nghị đã duyệt. Chọn “Lập phiếu thủ công” để tạo sản phẩm mới và nhập trực tiếp.');return;}const ingredient=ingredientOf(request.lines[index].ingredientId);setBarcodes({...barcodes,[index]:raw.trim()});setQuantities({...quantities,[index]:quantities[index]??String(request.lines[index].quantity)});setScanMessage(`Đã nhận diện ${ingredient.name}.`);setScanCode('');};
+  const lotCode=(rowSupplierId:string)=>`LOT-${request?.id??'PHIEU'}-${rowSupplierId||supplierId}`;
+  const submit=()=>{
+    if(!request){setError('Chọn đề nghị nhập đã được kế toán duyệt.');return;}
+    const lines=request.lines.map((_,lineIndex)=>{const rowSupplierId=lineSuppliers[lineIndex]||supplierId;return {lineIndex,quantity:Number(quantities[lineIndex]),expiryDate:expiryDates[lineIndex]??'',supplierId:rowSupplierId,barcode:barcodes[lineIndex]??'',receiptLotCode:lotCode(rowSupplierId)};});
+    const result=receivePurchaseRequest(request.id,supplierId,receivedAt,lines);
+    if(result){setError(result);return;}
+    setError('');setSuccess(`Đã lập phiếu nhập theo đề nghị ${request.id}; tồn kho đã được cập nhật.`);setRequestId('');
   };
 
-  const submit = () => {
-    const batch = receiveStock({
-      ingredientId: form.ingredientId,
-      barcode: barcode || UNKNOWN_BARCODE,
-      supplierId: form.supplierId,
-      quantity: Number(form.quantity),
-      unitCost: Number(form.unitCost),
-      receivedAt: new Date(form.receivedAt).toISOString(),
-      mfgDate: new Date(form.mfgDate).toISOString(),
-      expiryDate: new Date(form.expiryDate).toISOString(),
-      note: form.note
-    });
-    setCreated(batch);
-    setStep('done');
-  };
+  return <div className="px-6 py-6">
+    <PageHeader title="Nhập kho" subtitle="Lập phiếu theo đề nghị đã duyệt hoặc nhập trực tiếp không cần phiếu đề nghị." action={<div className="flex gap-2"><Button variant="secondary" onClick={()=>setManualMode(true)}>Lập phiếu thủ công</Button><Button variant="secondary" onClick={()=>window.print()}>In phiếu nhập</Button><Link to="/batches"><Button variant="secondary">Xem các lô hàng</Button></Link></div>} />
+    {success&&<div role="status" className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{success}</div>}
+    <Card className="mb-5 overflow-hidden"><CardHeader title="Đề nghị đã được kế toán duyệt" subtitle="Chọn đề nghị để lập phiếu nhập; mỗi đề nghị chỉ được nhập kho một lần." />
+      {!eligible.length?<div className="p-8 text-center text-sm text-slate-500">Chưa có đề nghị nào được kế toán duyệt. Khi kế toán hoàn tất duyệt ngân sách, đề nghị sẽ xuất hiện tại đây.</div>:<div className="overflow-x-auto"><table className="w-full min-w-[650px] text-sm"><thead><tr className="border-b text-left text-xs text-slate-500"><th className="p-3">Mã đề nghị</th><th>Người lập</th><th>Ngày gửi</th><th>Số mặt hàng</th><th>Tổng đề nghị</th><th>Trạng thái</th><th /></tr></thead><tbody>{eligible.map(item=><tr key={item.id} className="border-b"><td className="p-3 font-semibold">{item.id}</td><td>{item.requester}</td><td>{formatDateTime(item.requestedAt)}</td><td>{item.lines.length}</td><td>{formatVnd(item.lines.reduce((sum,line)=>sum+line.quantity*line.unitCost,0))}</td><td><Badge tone="green" dot>Đã duyệt, chờ nhập kho</Badge></td><td><Button size="sm" variant={requestId===item.id?'primary':'secondary'} onClick={()=>selectRequest(item.id)}>{requestId===item.id?'Đang chọn':'Lập phiếu nhập'}</Button></td></tr>)}</tbody></table></div>}
+    </Card>
 
-  const ing = ingredientOf(form.ingredientId);
+    {request&&<div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <Card className="overflow-hidden print-form"><CardHeader title={`PHIẾU NHẬP KHO · PN-${request.id}`} subtitle={`${request.requester} · ${request.reason}`} /><p className="border-b px-4 pb-3 text-xs text-slate-500">Ngày nhập: {receivedAt} · Theo đề nghị: {request.id} · {[...new Set(request.lines.map((line,index)=>lineSuppliers[index]??line.supplierId??supplierId))].map(id=>`${suppliers.find(supplier=>supplier.id===id)?.name??id}: ${lotCode(id)}`).join(' · ')}</p>
+        <div className="grid gap-4 border-b border-slate-100 p-4 sm:grid-cols-2"><Field label="Nhà cung cấp"><select className={inputClass} value={supplierId} onChange={event=>setSupplierId(event.target.value)}>{suppliers.map(supplier=><option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></Field><Field label="Ngày nhập thực tế"><input type="date" className={inputClass} value={receivedAt} onChange={event=>setReceivedAt(event.target.value)} /></Field></div>
+        <div className="border-b border-slate-100 bg-blue-50 p-4 no-print"><Field label="Quét hoặc nhập mã sản phẩm rồi nhấn Enter"><div className="flex gap-2"><span title="Mã vạch" aria-label="Biểu tượng mã vạch" className="inline-flex h-10 w-12 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-white text-blue-700"><BarcodeIcon /></span><input className={inputClass} value={scanCode} onChange={event=>setScanCode(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();scanProduct();}}} placeholder="Máy quét mã vạch hoặc nhập mã thủ công"/><Button variant="secondary" onClick={scanProduct}>Tìm mã</Button><Button variant="secondary" className="gap-2" onClick={()=>setShowScanner(true)}><BarcodeIcon /> Quét bằng camera</Button></div></Field>{scanMessage&&<p className="mt-2 text-xs text-blue-800">{scanMessage}</p>}</div><div className="overflow-x-auto"><table className="w-full min-w-[1250px] text-sm"><thead><tr className="border-b text-left text-xs text-slate-500"><th className="p-3">Nguyên liệu / mã</th><th>SL duyệt</th><th>SL thực nhận</th><th>Nhà cung cấp</th><th>Đơn giá</th><th>Hạn dùng</th><th>Mã lô</th><th>Mã sản phẩm</th><th>Tồn hiện tại</th></tr></thead><tbody>{request.lines.map((line,index)=>{const ingredient=ingredientOf(line.ingredientId);const rowSupplier=lineSuppliers[index]??line.supplierId??supplierId;return <tr key={`${line.ingredientId}-${index}`} className="border-b"><td className="p-3 font-medium">{ingredient.name} <span className="text-xs text-slate-500">({ingredient.unit})</span></td><td>{formatQty(line.quantity,ingredient.unit)}</td><td><input type="number" min="0" step="0.001" className={`${inputClass} max-w-36`} value={quantities[index]??''} onChange={event=>setQuantities({...quantities,[index]:event.target.value})} /></td><td><select className={inputClass} value={rowSupplier} onChange={event=>setLineSuppliers({...lineSuppliers,[index]:event.target.value})}>{suppliers.map(supplier=><option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select><span className="print-only">{suppliers.find(supplier=>supplier.id===rowSupplier)?.name}</span></td><td>{formatVnd(line.unitCost)}</td><td><input type="date" className={inputClass} value={expiryDates[index]??''} onChange={event=>setExpiryDates({...expiryDates,[index]:event.target.value})} /></td><td className="font-mono text-xs">{lotCode(rowSupplier)}</td><td><input className={inputClass} value={barcodes[index]??""} onChange={event=>setBarcodes({...barcodes,[index]:event.target.value})} placeholder="Mã vạch / nhập thủ công"/></td><td>{formatQty(availableQty(batches,ingredient.id),ingredient.unit)}</td></tr>;})}</tbody></table></div>
+        {error&&<p role="alert" className="px-4 pt-3 text-sm text-red-600">{error}</p>}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 p-4 no-print"><p className="text-xs text-slate-500">Số lượng thực nhận được phép khác đề nghị; giá nhập lấy theo đơn giá đã duyệt.</p><Button onClick={submit}>Ghi nhận nhập kho</Button></div><div className="print-only grid grid-cols-2 p-4 text-center text-sm"><div>Người giao hàng<div className="h-16"/>(Ký, họ tên)</div><div>Người nhận hàng<div className="h-16"/>(Ký, họ tên)</div></div>
+      </Card>
+      <Card className="h-fit p-4"><h2 className="font-semibold">Tóm tắt nhập kho</h2><dl className="mt-3 space-y-3 text-sm"><div className="flex justify-between gap-3"><dt className="text-slate-500">Mã đề nghị</dt><dd className="font-medium">{request.id}</dd></div><div className="flex justify-between gap-3"><dt className="text-slate-500">Ngày nhập</dt><dd className="font-medium">{receivedAt||'—'}</dd></div><div className="flex justify-between gap-3"><dt className="text-slate-500">Số dòng có hàng</dt><dd className="font-medium">{request.lines.filter((_,index)=>(Number(quantities[index])||0)>0).length}/{request.lines.length}</dd></div><div className="border-t pt-3"><dt className="text-slate-500">Tổng giá trị thực nhận</dt><dd className="mt-1 text-lg font-bold">{formatVnd(request.lines.reduce((sum,line,index)=>sum+(Number(quantities[index])||0)*line.unitCost,0))}</dd></div></dl><p className="mt-4 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-800">Khi xác nhận, hệ thống tạo lô và giao dịch kho theo số lượng, ngày nhập đã chỉnh; đề nghị chuyển sang trạng thái đã nhập kho.</p></Card>
+    </div>}
+    {showScanner&&<BarcodeScanner onClose={()=>setShowScanner(false)} onDetected={code=>{setScanCode(code);scanProduct(code);setShowScanner(false);}} />}
+  </div>;
+}
 
-  const steps = [
-  { id: 'scan', label: 'Quét mã' },
-  { id: 'form', label: 'Thông tin lô' },
-  { id: 'done', label: 'Hoàn tất' }];
+type ManualReceiptLine={ingredientId:string;quantity:string;unitCost:string;expiryDate:string;barcode:string};
 
+function ManualReceipt({onBack}:{onBack:()=>void}){
+  const {ingredients,suppliers,batches,receiveManual,saveIngredient,userName}=useApp();
+  const [supplierId,setSupplierId]=useState(suppliers[0]?.id??'');
+  const [receivedAt,setReceivedAt]=useState(localDate(new Date()));
+  const [receiptId]=useState(()=>`PN-${Date.now()}`);
+  const [lines,setLines]=useState<ManualReceiptLine[]>(()=>{const item=ingredients[0];return item?[{ingredientId:item.id,quantity:'1',unitCost:String(item.refCost),expiryDate:localDate(new Date(Date.now()+3*86_400_000)),barcode:item.code??''}]:[];});
+  const [error,setError]=useState('');const [success,setSuccess]=useState('');const [submitted,setSubmitted]=useState(false);const [scanCode,setScanCode]=useState('');const [scanMessage,setScanMessage]=useState('');const [showScanner,setShowScanner]=useState(false);const [showNewProduct,setShowNewProduct]=useState(false);const [newProduct,setNewProduct]=useState({code:'',name:'',unit:'kg' as Unit,group:'Đồ khô' as IngredientGroup,minStock:0,refCost:0});
+  const updateLine=(index:number,patch:Partial<ManualReceiptLine>)=>{if(submitted)return;setLines(current=>current.map((line,row)=>row===index?{...line,...patch}:line));};
+  const addLine=()=>{if(submitted)return;const item=ingredients[0];if(item)setLines(current=>[...current,{ingredientId:item.id,quantity:'1',unitCost:String(item.refCost),expiryDate:localDate(new Date(Date.now()+3*86_400_000)),barcode:item.code??''}]);};
+  const receiptLotCode=`LOT-${receiptId}`;
+  const scanToAdd=(raw=scanCode)=>{if(submitted)return;const code=raw.trim().toLowerCase();const item=ingredients.find(ingredient=>[ingredient.code,ingredient.id,ingredient.name].some(value=>value?.toLowerCase()===code));if(!item){setNewProduct({...newProduct,code:raw.trim()});setShowNewProduct(true);setScanMessage('Mã mới chưa có trong danh mục. Điền thông tin sản phẩm rồi lưu để thêm vào phiếu.');return;}setLines(current=>[...current,{ingredientId:item.id,quantity:'1',unitCost:String(item.refCost),expiryDate:localDate(new Date(Date.now()+3*86_400_000)),barcode:raw.trim()}]);setScanMessage(`Đã thêm ${item.name} vào phiếu.`);setScanCode('');};
+  const saveNewProduct=()=>{const code=newProduct.code.trim()||`SP-${Date.now()}`;const ingredient={...newProduct,id:`ING-${code}`,code};const result=saveIngredient(ingredient);if(result){setError(result);return;}setLines(current=>[...current,{ingredientId:ingredient.id,quantity:'1',unitCost:String(ingredient.refCost),expiryDate:localDate(new Date(Date.now()+3*86_400_000)),barcode:code}]);setNewProduct({code:'',name:'',unit:'kg',group:'Đồ khô',minStock:0,refCost:0});setShowNewProduct(false);setScanCode('');setError('');setScanMessage(`Đã lưu ${ingredient.name} vào danh mục và thêm vào phiếu nhập.`);};
+  const submit=()=>{if(submitted)return;const result=receiveManual(supplierId,receivedAt,receiptLotCode,lines.map(line=>({ingredientId:line.ingredientId,quantity:Number(line.quantity),unitCost:Number(line.unitCost),expiryDate:line.expiryDate,barcode:line.barcode})));if(result){setError(result);return;}setError('');setSuccess(`Đã ghi nhận phiếu ${receiptId} và cập nhật tồn kho.`);setSubmitted(true);};
+  return <div className="mx-auto max-w-7xl px-5 py-6"><PageHeader title="Lập phiếu nhập kho thủ công" subtitle="Nhập hàng trực tiếp, không cần tạo hoặc chọn phiếu đề nghị." action={<div className="flex gap-2"><Button variant="secondary" onClick={()=>window.print()}>In phiếu nhập</Button><Button variant="secondary" onClick={onBack}>Quay lại đề nghị</Button></div>} />
+    {success&&<p role="status" className="mb-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{success}</p>}
+    <Card className="p-5 print-form"><div className="mb-4 text-center"><h2 className="text-xl font-bold">PHIẾU NHẬP KHO</h2><p className="mt-1 text-right text-sm">Số: {receiptId} · Mã lô: {receiptLotCode} · Ngày nhập: {receivedAt}</p></div><p className="mb-4"><strong>Kính gửi:</strong> Bộ phận kho · <strong>Nhà cung cấp:</strong> <select className="rounded border px-2 py-1 no-print" value={supplierId} disabled={submitted} onChange={event=>setSupplierId(event.target.value)}>{suppliers.map(supplier=><option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select><span className="print-only">{suppliers.find(supplier=>supplier.id===supplierId)?.name}</span></p><p className="mb-4">* Nội dung: Nhập hàng trực tiếp vào kho · * Nhân viên: {userName}</p>
+      <div className="mb-4 no-print"><Field label="Ngày nhập thực tế"><input className={inputClass} type="date" value={receivedAt} disabled={submitted} onChange={event=>setReceivedAt(event.target.value)}/></Field><Field label="Quét hoặc nhập mã sản phẩm rồi nhấn Enter"><div className="flex gap-2"><span title="Quét mã vạch" aria-label="Biểu tượng quét mã vạch" className="inline-flex h-10 w-12 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-white text-blue-700"><BarcodeIcon /></span><input className={inputClass} value={scanCode} disabled={submitted} onChange={event=>setScanCode(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();scanToAdd();}}} placeholder="Máy quét mã vạch hoặc nhập mã thủ công"/><Button variant="secondary" onClick={scanToAdd}>Thêm mã</Button><Button variant="secondary" className="gap-2" onClick={()=>setShowScanner(true)}><BarcodeIcon /> Quét bằng camera</Button></div></Field>{scanMessage&&<p className="mt-1 text-xs text-blue-700">{scanMessage}</p>}</div>
+      {showNewProduct&&<Card className="my-4 border border-amber-300 bg-amber-50 p-4 no-print"><h3 className="font-semibold">Mã chưa có trong danh mục · Thêm sản phẩm mới</h3><p className="mb-3 mt-1 text-xs text-slate-600">Lưu sản phẩm vào danh mục kho, rồi thêm ngay vào phiếu nhập hiện tại.</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><Field label="Mã sản phẩm / mã vạch"><input className={inputClass} value={newProduct.code} onChange={event=>setNewProduct({...newProduct,code:event.target.value})}/></Field><Field label="Tên sản phẩm"><input className={inputClass} autoFocus value={newProduct.name} onChange={event=>setNewProduct({...newProduct,name:event.target.value})} placeholder="Nhập tên hàng mới"/></Field><Field label="Đơn vị tính"><select className={inputClass} value={newProduct.unit} onChange={event=>setNewProduct({...newProduct,unit:event.target.value as Unit})}>{(['kg','g','lít','ml','lon','quả','chai','gói','hộp','thùng'] as Unit[]).map(unit=><option key={unit}>{unit}</option>)}</select></Field><Field label="Nhóm hàng"><select className={inputClass} value={newProduct.group} onChange={event=>setNewProduct({...newProduct,group:event.target.value as IngredientGroup})}>{(['Thịt','Hải sản','Rau củ','Gia vị','Đồ uống','Đồ khô'] as IngredientGroup[]).map(group=><option key={group}>{group}</option>)}</select></Field><Field label="Tồn tối thiểu"><input className={inputClass} type="number" min="0" value={newProduct.minStock} onChange={event=>setNewProduct({...newProduct,minStock:Number(event.target.value)})}/></Field><Field label="Đơn giá"><input className={inputClass} type="number" min="0" value={newProduct.refCost} onChange={event=>setNewProduct({...newProduct,refCost:Number(event.target.value)})}/></Field></div><div className="mt-3 flex gap-2"><Button onClick={saveNewProduct}>Lưu và thêm vào phiếu</Button><Button variant="secondary" onClick={()=>setShowNewProduct(false)}>Hủy</Button></div></Card>}<div className="overflow-x-auto"><table className="request-form-table w-full min-w-[1100px] border-collapse text-sm"><thead><tr><th>STT</th><th>TÊN HÀNG HÓA</th><th>MÃ SẢN PHẨM</th><th>ĐƠN VỊ</th><th>SỐ LƯỢNG</th><th>ĐƠN GIÁ</th><th>THÀNH TIỀN</th><th>MÃ LÔ</th><th>HẠN DÙNG</th><th>MÃ VẠCH</th></tr></thead><tbody>{lines.map((line,index)=>{const item=ingredients.find(ingredient=>ingredient.id===line.ingredientId);return <tr key={index}><td>{index+1}</td><td><select className="w-full bg-transparent no-print" value={line.ingredientId} onChange={event=>{const selected=ingredients.find(ingredient=>ingredient.id===event.target.value);updateLine(index,{ingredientId:event.target.value,unitCost:String(selected?.refCost??0),barcode:selected?.code??''});}}>{ingredients.map(ingredient=><option key={ingredient.id} value={ingredient.id}>{ingredient.name}</option>)}</select><span className="print-only">{item?.name}</span></td><td>{item?.code??item?.id}</td><td>{item?.unit}</td><td><input className="w-full text-right" type="number" min="0.001" step="0.001" value={line.quantity} onChange={event=>updateLine(index,{quantity:event.target.value})}/></td><td><input className="w-full text-right" type="number" min="0" value={line.unitCost} onChange={event=>updateLine(index,{unitCost:event.target.value})}/></td><td className="text-right">{formatVnd(Number(line.quantity)*Number(line.unitCost))}</td><td className="font-mono text-xs">{receiptLotCode}</td><td><input type="date" className={inputClass} value={line.expiryDate} onChange={event=>updateLine(index,{expiryDate:event.target.value})}/></td><td><input className={inputClass} placeholder="Mã vạch / nhập mã" value={line.barcode} onChange={event=>updateLine(index,{barcode:event.target.value})}/></td></tr>;})}</tbody><tfoot><tr><td colSpan={6}><strong>Tổng</strong></td><td className="text-right"><strong>{formatVnd(lines.reduce((sum,line)=>sum+Number(line.quantity)*Number(line.unitCost),0))}</strong></td><td colSpan={3}/></tr></tfoot></table></div>
+      <div className="mt-3 flex justify-between no-print"><Button variant="secondary" disabled={submitted} onClick={addLine}>Thêm dòng hàng</Button><span className="self-center text-xs text-slate-500">Mã lô tự sinh khi xác nhận nhập kho.</span></div>{error&&<p role="alert" className="mt-3 text-sm text-red-600 no-print">{error}</p>}
+      <div className="mt-4 flex justify-end no-print"><Button disabled={submitted} onClick={submit}>Xác nhận nhập kho</Button></div><p className="mt-4 text-sm">Ghi chú: Nhập trực tiếp, không có phiếu đề nghị.</p><div className="mt-8 grid grid-cols-2 text-center text-sm"><div>Người giao hàng<div className="h-16"/>(Ký, họ tên)</div><div>Người nhận hàng<div className="h-16"/>(Ký, họ tên)</div></div></Card>
+  {showScanner&&<BarcodeScanner onClose={()=>setShowScanner(false)} onDetected={code=>{scanToAdd(code);setShowScanner(false);}} />}</div>;
+}
 
-  return (
-    <div className="px-6 py-6">
-      <PageHeader
-        title="Nhập hàng"
-        subtitle="Quét barcode/QR để tạo lô hàng mới với hạn sử dụng và giá nhập"
-        action={
-        <Link to="/batches">
-            <Button variant="secondary">Xem tất cả lô hàng</Button>
-          </Link>
-        } />
-      
+function BarcodeIcon(){
+  return <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6V4h3M18 4h3v2M21 18v2h-3M6 20H3v-2"/><path d="M7 8v8M10 8v8M12 8v8M15 8v8M17 8v8"/></svg>;
+}
 
-      <ol className="mb-5 flex items-center gap-3">
-        {steps.map((s, i) => {
-          const active = steps.findIndex((x) => x.id === step) >= i;
-          return (
-            <li key={s.id} className="flex items-center gap-3">
-              <span
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
-                active ?
-                'bg-brand-600 text-white' :
-                'bg-slate-200 text-slate-500'}`
-                }>
-                
-                {i + 1}
-              </span>
-              <span
-                className={`text-sm ${active ? 'font-medium text-slate-900' : 'text-slate-500'}`}>
-                
-                {s.label}
-              </span>
-              {i < steps.length - 1 &&
-              <span className="h-px w-10 bg-slate-300" />
-              }
-            </li>);
-
-        })}
-      </ol>
-
-      {step === 'scan' &&
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-          <Card className="lg:col-span-7">
-            <CardHeader
-            title="Quét barcode / QR code"
-            subtitle="Đưa mã trên bao bì vào khung quét" />
-          
-            <div className="p-6">
-              <div className="relative mx-auto flex aspect-video max-w-xl items-center justify-center overflow-hidden rounded-xl bg-slate-900">
-                <div className="absolute inset-8 rounded-lg border-2 border-white/30" />
-                {scanning &&
-              <motion.div
-                initial={{ top: '15%' }}
-                animate={{ top: '80%' }}
-                transition={{
-                  duration: 1.1,
-                  repeat: Infinity,
-                  repeatType: 'reverse',
-                  ease: 'linear'
-                }}
-                className="absolute left-8 right-8 h-0.5 bg-emerald-400 shadow-[0_0_12px_2px_rgba(52,211,153,0.6)]" />
-
-              }
-                <div className="text-center text-white/80">
-                  <CameraIcon className="mx-auto h-10 w-10" />
-                  <p className="mt-3 text-sm">
-                    {scanning ?
-                  'Đang đọc mã…' :
-                  'Camera sẵn sàng — chọn một mã mẫu để mô phỏng'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-5">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Mã mẫu để mô phỏng
-                </p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {[
-                { code: '8935001100011', label: 'Thịt bò ba chỉ (đã có)' },
-                { code: '8935001200028', label: 'Tôm sú tươi (đã có)' },
-                { code: '8935001300035', label: 'Rau xà lách (đã có)' },
-                { code: UNKNOWN_BARCODE, label: 'Mã chưa có trong hệ thống' }].
-                map((b) =>
-                <button
-                  key={b.code}
-                  disabled={scanning}
-                  onClick={() => startScan(b.code)}
-                  className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 text-left transition-colors duration-150 ease-out hover:border-brand-300 hover:bg-brand-50 disabled:opacity-50">
-                  
-                      <QrCodeIcon className="h-5 w-5 text-slate-500" />
-                      <div>
-                        <p className="tabular text-sm font-medium text-slate-900">
-                          {b.code}
-                        </p>
-                        <p className="text-xs text-slate-500">{b.label}</p>
-                      </div>
-                    </button>
-                )}
-                </div>
-              </div>
-
-              <div className="mt-5 flex items-end gap-3">
-                <Field label="Hoặc nhập mã thủ công" className="flex-1">
-                  <input
-                  value={barcode}
-                  onChange={(e) => setBarcode(e.target.value)}
-                  placeholder="Nhập mã barcode"
-                  className={inputClass} />
-                
-                </Field>
-                <Button
-                variant="secondary"
-                onClick={() => barcode && startScan(barcode)}>
-                
-                  <ScanLineIcon className="h-4 w-4" />
-                  Tra cứu
-                </Button>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="lg:col-span-5">
-            <CardHeader title="Quy trình nhập kho" />
-            <ol className="space-y-4 px-5 py-5 text-sm text-slate-600">
-              {[
-            'Nhấn + NHẬP HÀNG và mở camera quét barcode/QR.',
-            'Hệ thống đọc thông tin sản phẩm. Nếu mã chưa tồn tại, nhân viên tạo sản phẩm mới.',
-            'Nhập số lượng thực nhận (ví dụ 20 kg thịt bò ba chỉ).',
-            'Nhập hoặc xác nhận hạn sử dụng.',
-            'Hệ thống tự sinh mã lô (LOT-BO-001) và cộng tồn kho.',
-            'Ghi lịch sử giao dịch NHẬP KHO +20 kg.'].
-            map((t, i) =>
-            <li key={i} className="flex gap-3">
-                  <span className="tabular mt-0.5 h-5 w-5 shrink-0 rounded-full bg-slate-100 text-center text-xs font-semibold leading-5 text-slate-600">
-                    {i + 1}
-                  </span>
-                  {t}
-                </li>
-            )}
-            </ol>
-          </Card>
-        </div>
-      }
-
-      {step === 'form' &&
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-          <Card className="lg:col-span-8">
-            <CardHeader
-            title={isNew ? 'Tạo sản phẩm / lô mới' : 'Thông tin sản phẩm'}
-            subtitle={`Mã barcode: ${barcode}`}
-            action={
-            <Badge tone={isNew ? 'amber' : 'green'} dot>
-                  {isNew ? 'Barcode chưa tồn tại' : 'Đã có trong hệ thống'}
-                </Badge>
-            } />
-          
-            <div className="grid grid-cols-1 gap-4 px-5 py-5 sm:grid-cols-2">
-              <Field label="Nguyên liệu">
-                <select
-                value={form.ingredientId}
-                onChange={(e) =>
-                setForm((f) => ({ ...f, ingredientId: e.target.value }))
-                }
-                className={inputClass}>
-                
-                  {ingredients.map((i) =>
-                <option key={i.id} value={i.id}>
-                      {i.name} ({i.unit})
-                    </option>
-                )}
-                </select>
-              </Field>
-              <Field label="Nhà cung cấp">
-                <select
-                value={form.supplierId}
-                onChange={(e) =>
-                setForm((f) => ({ ...f, supplierId: e.target.value }))
-                }
-                className={inputClass}>
-                
-                  {suppliers.map((s) =>
-                <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                )}
-                </select>
-              </Field>
-              <Field label={`Số lượng (${ing.unit})`}>
-                <input
-                type="number"
-                min={0}
-                value={form.quantity}
-                onChange={(e) =>
-                setForm((f) => ({ ...f, quantity: e.target.value }))
-                }
-                className={inputClass} />
-              
-              </Field>
-              <Field label={`Giá nhập (VNĐ / ${ing.unit})`}>
-                <input
-                type="number"
-                min={0}
-                value={form.unitCost}
-                onChange={(e) =>
-                setForm((f) => ({ ...f, unitCost: e.target.value }))
-                }
-                className={inputClass} />
-              
-              </Field>
-              <Field label="Ngày nhập">
-                <input
-                type="date"
-                value={form.receivedAt}
-                onChange={(e) =>
-                setForm((f) => ({ ...f, receivedAt: e.target.value }))
-                }
-                className={inputClass} />
-              
-              </Field>
-              <Field label="Ngày sản xuất">
-                <input
-                type="date"
-                value={form.mfgDate}
-                onChange={(e) =>
-                setForm((f) => ({ ...f, mfgDate: e.target.value }))
-                }
-                className={inputClass} />
-              
-              </Field>
-              <Field
-              label="Hạn sử dụng"
-              hint="Còn ≤ 2 ngày sẽ tự động vào danh sách cảnh báo">
-              
-                <input
-                type="date"
-                value={form.expiryDate}
-                onChange={(e) =>
-                setForm((f) => ({ ...f, expiryDate: e.target.value }))
-                }
-                className={inputClass} />
-              
-              </Field>
-              <Field label="Ghi chú">
-                <input
-                value={form.note}
-                onChange={(e) =>
-                setForm((f) => ({ ...f, note: e.target.value }))
-                }
-                placeholder="Tình trạng hàng, người giao…"
-                className={inputClass} />
-              
-              </Field>
-            </div>
-            <div className="flex justify-end gap-3 border-t border-slate-200 px-5 py-4">
-              <Button variant="secondary" onClick={() => setStep('scan')}>
-                Quét lại
-              </Button>
-              <Button onClick={submit} disabled={Number(form.quantity) <= 0}>
-                <PackagePlusIcon className="h-4 w-4" />
-                Lưu vào kho
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="lg:col-span-4">
-            <CardHeader title="Xem trước" subtitle="Ảnh hưởng tới tồn kho" />
-            <dl className="space-y-3 px-5 py-5 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-slate-500">Nguyên liệu</dt>
-                <dd className="font-medium text-slate-900">{ing.name}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-slate-500">Tồn hiện tại</dt>
-                <dd className="tabular text-slate-900">
-                  {formatQty(availableQty(batches, ing.id), ing.unit)}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-slate-500">Nhập thêm</dt>
-                <dd className="tabular font-medium text-emerald-600">
-                  +{formatQty(Number(form.quantity) || 0, ing.unit)}
-                </dd>
-              </div>
-              <div className="flex justify-between border-t border-slate-200 pt-3">
-                <dt className="text-slate-500">Tồn sau khi nhập</dt>
-                <dd className="tabular font-semibold text-slate-900">
-                  {formatQty(
-                  availableQty(batches, ing.id) + (Number(form.quantity) || 0),
-                  ing.unit
-                )}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-slate-500">Giá trị lô</dt>
-                <dd className="tabular font-semibold text-slate-900">
-                  {formatVnd(
-                  (Number(form.quantity) || 0) * (Number(form.unitCost) || 0)
-                )}
-                </dd>
-              </div>
-            </dl>
-          </Card>
-        </div>
-      }
-
-      {step === 'done' && created &&
-      <Card className="mx-auto max-w-2xl">
-          <div className="px-6 py-8 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
-              <CheckCircle2Icon className="h-6 w-6 text-emerald-600" />
-            </div>
-            <h2 className="mt-4 text-lg font-semibold text-slate-900">
-              Nhập kho thành công
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Hệ thống đã tự động tạo mã lô và ghi lịch sử giao dịch.
-            </p>
-
-            <dl className="mt-6 grid grid-cols-2 gap-4 rounded-xl bg-slate-50 p-5 text-left text-sm">
-              <div>
-                <dt className="text-xs text-slate-500">Mã lô</dt>
-                <dd className="text-base font-semibold text-slate-900">
-                  {created.id}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">Nguyên liệu</dt>
-                <dd className="font-medium text-slate-900">
-                  {ingredientOf(created.ingredientId).name}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">Tồn kho</dt>
-                <dd className="tabular font-medium text-emerald-600">
-                  +
-                  {formatQty(
-                  created.quantity,
-                  ingredientOf(created.ingredientId).unit
-                )}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">Giá trị nhập</dt>
-                <dd className="tabular font-medium text-slate-900">
-                  {formatVnd(created.quantity * created.unitCost)}
-                </dd>
-              </div>
-            </dl>
-
-            <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-500">
-              <SparklesIcon className="h-3.5 w-3.5" />
-              Giao dịch “NHẬP KHO +
-              {formatQty(
-              created.quantity,
-              ingredientOf(created.ingredientId).unit
-            )}
-              ” đã được ghi vào lịch sử kho
-            </div>
-
-            <div className="mt-6 flex justify-center gap-3">
-              <Button
-              variant="secondary"
-              onClick={() => {
-                setCreated(null);
-                setBarcode('');
-                setStep('scan');
-              }}>
-              
-                Nhập lô tiếp theo
-              </Button>
-              <Link to="/batches">
-                <Button>
-                  Xem lô hàng
-                  <ArrowRightIcon className="h-4 w-4" />
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </Card>
-      }
-    </div>);
-
+function BarcodeScanner({onClose,onDetected}:{onClose:()=>void;onDetected:(code:string)=>void}){
+  const videoRef=useRef<HTMLVideoElement>(null);const detectedRef=useRef(onDetected);detectedRef.current=onDetected;
+  const [status,setStatus]=useState('Đang mở camera…');const [manualCode,setManualCode]=useState('');
+  useEffect(()=>{
+    let stream:MediaStream|undefined;let timer:number|undefined;let cancelled=false;let finished=false;
+    const start=async()=>{
+      try{
+        if(!navigator.mediaDevices?.getUserMedia)throw new Error('Thiết bị hoặc trình duyệt không hỗ trợ camera.');
+        stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+        if(cancelled){stream.getTracks().forEach(track=>track.stop());return;}
+        const video=videoRef.current;if(!video)return;video.srcObject=stream;await video.play();
+        const Detector=(window as unknown as {BarcodeDetector?:new(options?:{formats:string[]})=>{detect:(source:HTMLVideoElement)=>Promise<Array<{rawValue:string}>>}}).BarcodeDetector;
+        if(!Detector){setStatus('Camera đã mở nhưng trình duyệt chưa hỗ trợ nhận dạng mã. Nhập mã thủ công bên dưới.');return;}
+        const detector=new Detector({formats:['ean_13','ean_8','code_128','code_39','upc_a','upc_e','qr_code']});setStatus('Đưa mã vạch vào khung hình để quét.');
+        const scan=async()=>{if(cancelled||finished||!videoRef.current)return;try{const found=await detector.detect(videoRef.current);const code=found[0]?.rawValue;if(code){finished=true;detectedRef.current(code);return;}}catch{/* Continue scanning while the camera is active. */}timer=window.setTimeout(scan,250);};void scan();
+      }catch(error){setStatus(error instanceof Error?error.message:'Không thể mở camera. Bạn vẫn có thể nhập mã thủ công.');}
+    };
+    void start();return()=>{cancelled=true;if(timer!==undefined)window.clearTimeout(timer);stream?.getTracks().forEach(track=>track.stop());};
+  },[]);
+  return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4" role="dialog" aria-modal="true" aria-label="Quét mã vạch"><Card className="w-full max-w-xl overflow-hidden"><div className="flex items-center justify-between border-b p-4"><h2 className="font-semibold">Quét mã vạch</h2><Button variant="ghost" onClick={onClose}>Đóng</Button></div><div className="p-4"><div className="relative overflow-hidden rounded-xl bg-black"><video ref={videoRef} className="aspect-video w-full object-cover" muted playsInline/><div className="pointer-events-none absolute inset-x-[12%] top-1/2 h-24 -translate-y-1/2 rounded-lg border-2 border-emerald-400"><span className="absolute inset-x-0 top-1/2 border-t border-red-400"/></div></div><p className="mt-3 text-sm text-slate-600">{status}</p><div className="mt-4 flex gap-2"><input autoFocus className={inputClass} value={manualCode} onChange={event=>setManualCode(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&manualCode.trim())onDetected(manualCode.trim());}} placeholder="Hoặc nhập mã sản phẩm thủ công"/><Button disabled={!manualCode.trim()} onClick={()=>onDetected(manualCode.trim())}>Dùng mã</Button></div></div></Card></div>;
 }
