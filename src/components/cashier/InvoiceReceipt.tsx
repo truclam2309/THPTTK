@@ -1,4 +1,5 @@
 import { useApp } from '../../contexts/AppContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { formatDateTime, formatVnd } from '../../utils/format';
 import { orderTotals, submittedLines } from '../../utils/order';
 import type { Order } from '../../types';
@@ -12,6 +13,7 @@ export function InvoiceReceipt({
 
 }: {order: Order;provisional?: boolean;}) {
   const { tableOf } = useApp();
+  const { user } = useAuth();
   const lines = submittedLines(order);
   const totals = provisional ?
   orderTotals(lines, order.discountRate) :
@@ -21,9 +23,11 @@ export function InvoiceReceipt({
     vat: order.vat,
     total: order.total
   };
+  const collected = provisional ? totals.total : order.paidAmount ?? totals.total;
+  const outstanding = provisional ? 0 : order.debtAmount ?? Math.max(0, totals.total - collected);
   const change =
   order.paymentMethod === 'Tiền mặt' && order.cashReceived ?
-  order.cashReceived - order.total :
+  order.cashReceived - collected :
   0;
 
   return (
@@ -42,7 +46,9 @@ export function InvoiceReceipt({
         <p>Bàn: {tableOf(order.tableId)?.name ?? order.tableId}</p>
         <p>Giờ vào: {formatDateTime(order.createdAt)}</p>
         {order.paidAt && <p>Giờ TT: {formatDateTime(order.paidAt)}</p>}
-        {order.paidBy && <p>Thu ngân: {order.paidBy}</p>}
+        <p>Nhân viên phục vụ: {order.createdBy || '—'}</p>
+        <p>Thu ngân: {order.paidBy || (provisional ? user?.name : undefined) || '—'}</p>
+        {order.customerName && <p>Khách nợ: {order.customerName}{order.customerPhone ? ` · ${order.customerPhone}` : ''}</p>}
       </div>
       <table className="mt-2 w-full border-t border-dashed border-slate-400">
         <thead>
@@ -77,6 +83,8 @@ export function InvoiceReceipt({
         {order.paymentMethod &&
         <p className="flex justify-between"><span>Thanh toán</span><span>{order.paymentMethod}</span></p>
         }
+        {!provisional && <p className="flex justify-between"><span>Đã thu</span><span>{formatVnd(collected)}</span></p>}
+        {outstanding > 0 && <p className="flex justify-between font-bold text-red-700"><span>CÒN NỢ · {order.debtDueDate ? `hạn ${formatDateTime(`${order.debtDueDate}T00:00:00`)}` : order.id}</span><span>{formatVnd(outstanding)}</span></p>}
         {order.cashReceived ?
         <>
             <p className="flex justify-between"><span>Khách đưa</span><span>{formatVnd(order.cashReceived)}</span></p>

@@ -160,6 +160,12 @@ export interface Order {
   paidBy?: string;
   paymentMethod?: PaymentMethod;
   cashReceived?: number;
+  /** Số tiền đã thu tại quầy khi xác nhận bill; phần thiếu được ghi công nợ. */
+  paidAmount?: number;
+  debtAmount?: number;
+  debtDueDate?: string;
+  customerName?: string;
+  customerPhone?: string;
   subtotal: number;
   discountRate: number;
   discount: number;
@@ -257,6 +263,30 @@ export interface CashierShift {
   accountingNote?: string;
 }
 
+export interface PayrollLine {
+  username: string;
+  name: string;
+  department: string;
+  workDays: number;
+  hours: number;
+  ratePerDay: number;
+  amount: number;
+}
+
+export interface PayrollRecord {
+  id: string;
+  month: string;
+  createdAt: string;
+  createdBy: string;
+  lines: PayrollLine[];
+  total: number;
+  status: 'PENDING_ACCOUNTING' | 'ACCOUNTANT_APPROVED' | 'REVISION_REQUESTED';
+  accountingNote?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  demo?: boolean;
+}
+
 export type CashVoucherType = 'RECEIPT' | 'PAYMENT';
 export type CashVoucherMethod = 'Tiền mặt' | 'Chuyển khoản';
 export type CashVoucherPartyType = 'Khách hàng' | 'Nhà cung cấp' | 'Nhân viên' | 'Khác';
@@ -274,6 +304,8 @@ export interface CashVoucher {
   bankAccount?: string;
   attachment?: string;
   accountingTreatment: 'INCOME' | 'EXPENSE' | 'CASH_ONLY';
+  debtId?: string;
+  sourceDocumentId?: string;
   createdBy: string;
   createdAt: string;
   status: 'Đã xác nhận';
@@ -286,6 +318,25 @@ export interface CashLedger {
   openingBank: number;
   bankAccountName: string;
   closedPeriods: string[];
+}
+
+export type DebtSide = 'receivable' | 'payable';
+export type DebtSourceType = 'SALES_INVOICE' | 'GOODS_RECEIPT';
+export interface DebtPayment { id: string; voucherId?: string; date: string; amount: number; method: PaymentMethod; }
+export interface DebtRecord {
+  id: string;
+  side: DebtSide;
+  sourceType: DebtSourceType;
+  sourceId: string;
+  party: string;
+  contact?: string;
+  sourceLabel: string;
+  date: string;
+  dueDate: string;
+  amount: number;
+  paid: number;
+  payments: DebtPayment[];
+  demo?: boolean;
 }
 
 export interface Account {

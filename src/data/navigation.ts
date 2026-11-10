@@ -12,6 +12,7 @@ import {
   LayoutDashboardIcon,
   LayoutGridIcon,
   PackageIcon,
+  PackageCheckIcon,
   PackagePlusIcon,
   ReceiptTextIcon,
   SearchIcon,
@@ -50,9 +51,10 @@ export const navGroups: {title: string;items: NavItem[];}[] = [
   items: [
   { to: '/', label: 'Dashboard', icon: LayoutDashboardIcon, roles: [QL] },
   { to: '/tables', label: 'Sơ đồ bàn', icon: LayoutGridIcon, roles: [QL, PV] },
-  { to: '/order-status', label: 'Theo dõi món ăn', icon: TimerIcon, roles: [PV] },
   { to: '/kitchen', label: 'Bếp', icon: ChefHatIcon, roles: [BEP], badge: 'kitchen' },
-  { to: '/cashier', label: 'Thu ngân', icon: WalletIcon, roles: [TN], badge: 'cashier' },
+  { to: '/cashier', label: 'Sơ đồ bàn', icon: LayoutGridIcon, roles: [TN], badge: 'cashier' },
+  { to: '/cashier?screen=available', label: 'Món có sẵn', icon: PackageCheckIcon, roles: [TN] },
+  { to: '/cashier?screen=shift', label: 'Chốt ca', icon: WalletIcon, roles: [TN] },
   { to: '/invoices', label: 'Lịch sử hóa đơn', icon: ScrollTextIcon, roles: [QL, TN] }]
 
 },
@@ -84,17 +86,21 @@ export const navGroups: {title: string;items: NavItem[];}[] = [
   { to: '/accountant', label: 'Tổng quan kế toán', icon: ClipboardCheckIcon, roles: [KT] },
   { to: '/accountant/revenue', label: 'Theo dõi doanh thu', icon: ReceiptTextIcon, roles: [KT] },
   { to: '/accountant/cash-vouchers', label: 'Phiếu thu, chi', icon: ReceiptTextIcon, roles: [KT] },
+  { to: '/accountant/debts', label: 'Quản lý công nợ', icon: CoinsIcon, roles: [KT] },
   { to: '/accountant/costs', label: 'Theo dõi chi phí', icon: CoinsIcon, roles: [KT] },
   { to: '/accountant/lookup', label: 'Tra cứu doanh thu, chi phí', icon: SearchIcon, roles: [KT] },
   { to: '/accountant/requests', label: 'Duyệt đề nghị', icon: PackagePlusIcon, roles: [KT] },
+  { to: '/accountant/payroll', label: 'Kiểm tra bảng lương', icon: CoinsIcon, roles: [KT] },
   { to: '/manager/requests', label: 'Phê duyệt đề nghị nhập kho', icon: PackagePlusIcon, roles: [QL] },
   { to: '/manager/attendance', label: 'Chấm công', icon: ClipboardCheckIcon, roles: [QL] },
+  { to: '/manager/payroll', label: 'Bảng lương', icon: CoinsIcon, roles: [QL] },
   { to: '/accountant/reconciliation', label: 'Đối chiếu ngân sách', icon: CoinsIcon, roles: [KT] },
   { to: '/accountant/reports', label: 'Báo cáo tài chính', icon: BarChart3Icon, roles: [KT] },
   { to: '/finance/revenue', label: 'Doanh thu', icon: ReceiptTextIcon, roles: [QL] },
   { to: '/finance/cost', label: 'Chi phí', icon: CoinsIcon, roles: [QL] },
   { to: '/finance/profit', label: 'Lợi nhuận', icon: TrendingUpIcon, roles: [QL] },
-  { to: '/reports', label: 'Báo cáo', icon: BarChart3Icon, roles: [QL, KHO, TN] }]
+  { to: '/manager/cashier-shifts', label: 'Báo cáo chốt ca thu ngân', icon: ClipboardCheckIcon, roles: [QL] },
+  { to: '/reports', label: 'Báo cáo', icon: BarChart3Icon, roles: [QL, KHO] }]
 
 },
 {
@@ -113,7 +119,7 @@ export const routeRoles: Record<string, Role[]> = {
   ...Object.fromEntries(
     navGroups.flatMap((g) => g.items.map((i) => [i.to, i.roles]))
   ),
-  '/order': [PV],
+  '/order': [PV, TN],
   '/finance': [QL],
   '/accountant': [KT],
   '/accountant/requests': [KT],

@@ -298,13 +298,17 @@ export const tables: DiningTable[] = [
 
 
 export const accounts: Account[] = [
-{ username: 'admin', password: '123456', name: 'Quản trị hệ thống', role: 'Admin' },
-{ username: 'quanly', password: '123456', name: 'Nguyễn Minh Quân', role: 'Quản lý' },
-{ username: 'bep', password: '123456', name: 'Lê Văn Bếp', role: 'Bếp' },
-{ username: 'phucvu', password: '123456', name: 'Phạm Thu Hà', role: 'Phục vụ' },
-{ username: 'thungan', password: '123456', name: 'Võ Ngọc Lan', role: 'Thu ngân' },
-{ username: 'kho', password: '123456', name: 'Trần Văn Kho', role: 'Nhân viên kho' },
-{ username: 'ketoan', password: '123456', name: 'Nguyễn Thu Trang', role: 'Kế toán' }];
+{ username: 'nguyenducanh', password: '123456', name: 'Nguyễn Đức Anh', role: 'Admin' },
+{ username: 'nguyenminhquan', password: '123456', name: 'Nguyễn Minh Quân', role: 'Quản lý' },
+{ username: 'lethanhdat', password: '123456', name: 'Lê Thành Đạt', role: 'Bếp' },
+{ username: 'nguyenvanhung', password: '123456', name: 'Nguyễn Văn Hưng', role: 'Bếp' },
+{ username: 'phamthuha', password: '123456', name: 'Phạm Thu Hà', role: 'Phục vụ' },
+{ username: 'nguyenngocanh', password: '123456', name: 'Nguyễn Ngọc Anh', role: 'Phục vụ' },
+{ username: 'vongoclan', password: '123456', name: 'Võ Ngọc Lan', role: 'Thu ngân' },
+{ username: 'tranbichngoc', password: '123456', name: 'Trần Bích Ngọc', role: 'Thu ngân' },
+{ username: 'tranvankhoa', password: '123456', name: 'Trần Văn Khoa', role: 'Nhân viên kho' },
+{ username: 'lethanhson', password: '123456', name: 'Lê Thanh Sơn', role: 'Nhân viên kho' },
+{ username: 'nguyenthutrang', password: '123456', name: 'Nguyễn Thu Trang', role: 'Kế toán' }];
 
 
 type L = OrderLine;
@@ -329,7 +333,7 @@ method: Order['paymentMethod'], cost: number)
     id, tableId, lines, status: 'PAID', createdAt: iso(0, hour, minute - 40),
     createdBy: 'Phạm Thu Hà', paidAt: iso(0, hour, minute), paidBy: 'Võ Ngọc Lan',
     paymentMethod: method, subtotal, discountRate: 0, discount: 0, vat,
-    total: subtotal + vat, cost
+    total: subtotal + vat, paidAmount: subtotal + vat, debtAmount: 0, cost
   };
 };
 
@@ -361,13 +365,18 @@ const demoHistoricalOrders: Order[] = (() => {
       const discountRate = sale % 4 === 0 ? 5 : 0;
       const discount = Math.round(subtotal * discountRate / 100);
       const vat = Math.round((subtotal - discount) * 0.08);
+      const total = subtotal - discount + vat;
+      const creditSale = sale === 1 || sale === 7;
       result.push({
         id: `HD-DEMO-${monthDate.getFullYear()}${String(monthDate.getMonth() + 1).padStart(2, '0')}-${String(sale + 1).padStart(2, '0')}`,
         tableId: `T-${String(sale % 12 + 1).padStart(2, '0')}`, lines, status: 'PAID',
         createdAt: new Date(soldAt.getTime() - 35 * 60_000).toISOString(), createdBy: 'Nhân viên phục vụ demo',
         paidAt: soldAt.toISOString(), paidBy: 'Thu ngân demo', paymentMethod: methods[sale % methods.length],
         demo: true,
-        subtotal, discountRate, discount, vat, total: subtotal - discount + vat,
+        subtotal, discountRate, discount, vat, total,
+        paidAmount: creditSale ? Math.round(total * 0.4) : total,
+        debtAmount: creditSale ? total - Math.round(total * 0.4) : 0,
+        debtDueDate: creditSale ? new Date(soldAt.getTime() + 14 * DAY).toISOString().slice(0, 10) : undefined,
         cost: lines.reduce((sum, line) => sum + (line.dishId === a.id ? a.cost : b.cost) * line.qty, 0)
       });
     }

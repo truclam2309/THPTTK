@@ -22,6 +22,7 @@ export function Tables() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const isManager = user?.role === 'Quản lý';
+  const isCashier = user?.role === 'Thu ngân';
 
   const [areaId, setAreaId] = useState(areas[0]?.id ?? '');
   const [editMode, setEditMode] = useState(false);
@@ -156,7 +157,7 @@ export function Tables() {
                       `${minutesSince(order!.createdAt)} phút · ${items} món` :
                       editMode ?
                       'Nhấn để sửa' :
-                      'Nhấn để gọi món'}
+                      (isCashier ? 'Nhấn để xem order' : 'Nhấn để gọi món')}
                       </p>
                     </div>
                   </button>

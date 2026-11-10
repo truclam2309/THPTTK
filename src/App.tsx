@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, ROLE_HOME, useAuth } from './contexts/AuthContext';
-import { AppProvider } from './contexts/AppContext';
+import { AppProvider, useApp } from './contexts/AppContext';
 import { AppShell } from './components/layout/AppShell';
 import { RequireRole } from './components/auth/RequireRole';
 import { Login } from './pages/Login';
@@ -30,6 +30,10 @@ import { AdminAccounts, LoginHistory } from './pages/Admin';
 import { OrderStatus } from './pages/OrderStatus';
 import { PurchaseRequests, Stocktake } from './pages/WarehouseForms';
 import { Attendance } from './pages/Attendance';
+import { Payroll } from './pages/Payroll';
+import { ManagerCashierShifts } from './pages/ManagerCashierShifts';
+import { Debts } from './pages/Debts';
+import { ExpenseTracking } from './pages/ExpenseTracking';
 
 const ROUTES: {path: string;guard: string;element: React.ReactNode;}[] = [
 { path: '/', guard: '/', element: <Dashboard /> },
@@ -37,6 +41,7 @@ const ROUTES: {path: string;guard: string;element: React.ReactNode;}[] = [
 { path: '/order/:tableId', guard: '/order', element: <OrderPage /> },
 { path: '/kitchen', guard: '/kitchen', element: <Kitchen /> },
 { path: '/cashier', guard: '/cashier', element: <Cashier /> },
+{ path: '/manager/cashier-shifts', guard: '/manager/cashier-shifts', element: <ManagerCashierShifts /> },
 { path: '/invoices', guard: '/invoices', element: <Invoices /> },
 { path: '/inventory', guard: '/inventory', element: <Inventory /> },
 { path: '/receive', guard: '/receive', element: <Receive /> },
@@ -64,17 +69,21 @@ ROUTES.push(
 { path: '/accountant/requests', guard: '/accountant/requests', element: <Accountant initialTab="requests" /> },
 { path: '/manager/requests', guard: '/manager/requests', element: <Accountant initialTab="requests" /> },
 { path: '/manager/attendance', guard: '/manager/attendance', element: <Attendance /> },
+{ path: '/manager/payroll', guard: '/manager/payroll', element: <Payroll /> },
+{ path: '/accountant/payroll', guard: '/accountant/payroll', element: <Payroll /> },
 { path: '/accountant/reconciliation', guard: '/accountant/reconciliation', element: <Accountant initialTab="reconciliation" /> },
 { path: '/accountant/reports', guard: '/accountant/reports', element: <Accountant initialTab="reports" /> }
 ,{ path: '/accountant/lookup', guard: '/accountant/lookup', element: <Accountant initialTab="lookup" /> }
 ,{ path: '/accountant/revenue', guard: '/accountant/revenue', element: <Accountant initialTab="revenue" /> }
 ,{ path: '/accountant/cash-vouchers', guard: '/accountant/cash-vouchers', element: <Accountant initialTab="vouchers" /> }
-,{ path: '/accountant/costs', guard: '/accountant/costs', element: <Accountant initialTab="lookup" /> }
+,{ path: '/accountant/debts', guard: '/accountant/debts', element: <Debts /> }
+,{ path: '/accountant/costs', guard: '/accountant/costs', element: <ExpenseTracking /> }
 );
 
 
 function AppRoutes() {
   const { user } = useAuth();
+  const { cashierShifts } = useApp();
 
   if (!user) {
     return (
@@ -85,7 +94,8 @@ function AppRoutes() {
 
   }
 
-  const home = ROLE_HOME[user.role];
+  const hasOpenCashierShift = user.role === 'Thu ngân' && cashierShifts.some((shift) => shift.cashier === user.name && shift.status === 'OPEN');
+  const home = user.role === 'Thu ngân' ? (hasOpenCashierShift ? '/cashier' : '/cashier?screen=shift') : ROLE_HOME[user.role];
 
   return (
     <Routes>

@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { ClipboardListIcon, LogOutIcon } from 'lucide-react';
 import { useMetrics } from '../../hooks/useMetrics';
 import { useAuth } from '../../contexts/AuthContext';
@@ -19,6 +19,7 @@ const BADGE_TONE: Record<BadgeKey, string> = {
 export function Sidebar({ mobileOpen, onNavigate }: SidebarProps) {
   const m = useMetrics();
   const { user, logout } = useAuth();
+  const location = useLocation();
 
   const badgeValue: Record<BadgeKey, number> = {
     kitchen: m.kitchenLines.length,
@@ -67,13 +68,15 @@ export function Sidebar({ mobileOpen, onNavigate }: SidebarProps) {
                     to={item.to}
                     end={item.to === '/'}
                     onClick={onNavigate}
-                    className={({ isActive }) =>
-                    `flex items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition-colors duration-150 ease-out ${
-                    isActive ?
+                    className={({ isActive }) => {
+                    const active = item.to.includes('?')
+                      ? `${location.pathname}${location.search}` === item.to
+                      : isActive;
+                    return `flex items-center gap-2.5 rounded-lg px-2 py-2 text-sm transition-colors duration-150 ease-out ${
+                    active ?
                     'bg-brand-500/15 font-semibold text-blue-200 ring-1 ring-inset ring-brand-400/20' :
                     'text-slate-300 hover:bg-white/5 hover:text-white'}`
-
-                    }>
+                    }}>
                     
                       <item.icon className="h-4 w-4 shrink-0" />
                       <span className="flex-1 truncate">{item.label}</span>

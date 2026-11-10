@@ -1,22 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BanknoteIcon,
   BarChart3Icon,
   CheckCircle2Icon,
   CreditCardIcon,
   PrinterIcon,
-  PackageCheckIcon,
   QrCodeIcon,
   ScrollTextIcon,
-  WalletIcon } from
+  ArrowLeftIcon,
+  UsersIcon } from
 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { InvoiceModal } from '../components/cashier/InvoiceModal';
 import { useApp } from '../contexts/AppContext';
 import { useAuth } from '../contexts/AuthContext';
-import { Modal } from '../components/ui/Modal';
 import { Field, inputClass } from '../components/ui/Field';
 import { formatVnd } from '../utils/format';
 import {
@@ -37,10 +36,13 @@ const METHODS: {id: PaymentMethod;icon: React.ComponentType<{className?: string;
 
 
 export function Cashier() {
-  const { orders, dishes, tableOf, payOrder, completeDirectSale, showToast, cashierShifts, openCashierShift, closeCashierShift } = useApp();
+  const { orders, dishes, tableOf, areas, tables, payOrder, completeDirectSale, showToast, cashierShifts, openCashierShift, closeCashierShift } = useApp();
   const { user } = useAuth();
-  const [screen, setScreen] = useState<'payment' | 'available'>('payment');
-  const [salesDate, setSalesDate] = useState(() => new Date().toLocaleDateString('en-CA'));
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const requestedScreen = searchParams.get('screen') === 'available' ? 'available' : searchParams.get('screen') === 'shift' ? 'shift' : 'payment';
+  const [areaId, setAreaId] = useState(areas[0]?.id ?? '');
+  const [showPayment, setShowPayment] = useState(false);
 
   const open = orders.
   filter((o) => o.status === 'OPEN' && submittedLines(o).length > 0).
@@ -51,12 +53,24 @@ export function Cashier() {
 
   const [selectedId, setSelectedId] = useState<string | null>(open[0]?.id ?? null);
   const [discountRate, setDiscountRate] = useState(0);
+  const [allowDebt, setAllowDebt] = useState(false);
+  const [paidNow, setPaidNow] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('Tiền mặt');
   const [cash, setCash] = useState('');
   const [invoice, setInvoice] = useState<Order | null>(null);
   const [provisional, setProvisional] = useState<Order | null>(null);
-  const [openingCash,setOpeningCash]=useState(''); const [openingNote,setOpeningNote]=useState(''); const [actualCash,setActualCash]=useState(''); const [varianceReason,setVarianceReason]=useState(''); const [shiftError,setShiftError]=useState(''); const [closeOpen,setCloseOpen]=useState(false);
+  const [openingCash,setOpeningCash]=useState(''); const [openingNote,setOpeningNote]=useState(''); const [actualCash,setActualCash]=useState(''); const [varianceReason,setVarianceReason]=useState(''); const [shiftError,setShiftError]=useState('');
   const activeShift=cashierShifts.find(s=>s.cashier===user?.name&&s.status==='OPEN');
+  const anotherOpenShift=cashierShifts.find(s=>s.status==='OPEN'&&s.cashier!==user?.name);
+  const screen = activeShift ? requestedScreen : 'shift';
+
+  const startShift = () => {
+    const err = openCashierShift(Number(openingCash), openingNote);
+    setShiftError(err ?? '');
+    if (!err) { setOpeningCash(''); setOpeningNote(''); navigate('/cashier'); }
+  };
 
   const selected = open.find((o) => o.id === selectedId) ?? open[0];
 
@@ -64,15 +78,20 @@ export function Cashier() {
     setDiscountRate(0);
     setCash('');
     setMethod('Tiền mặt');
+    setAllowDebt(false);
+    setPaidNow('');
+    setCustomerName('');
+    setCustomerPhone('');
   }, [selected?.id]);
 
-  const cashierSales = orders.filter((o) =>
-    o.status === 'PAID' && o.paidBy === user?.name && o.paidAt?.slice(0, 10) === salesDate
-  );
-  const shiftRevenue = cashierSales.reduce((s, o) => s + o.total, 0);
-  const shiftCash = cashierSales.filter((o) => o.paymentMethod === 'Tiền mặt').reduce((s, o) => s + o.total, 0);
-  const shiftTransfer = cashierSales.filter((o) => o.paymentMethod === 'Chuyển khoản').reduce((s, o) => s + o.total, 0);
-  const shiftCard = cashierSales.filter((o) => o.paymentMethod === 'Thẻ').reduce((s, o) => s + o.total, 0);
+  const cashierSales = activeShift ? orders.filter((order) =>
+    order.status === 'PAID' && order.paidBy === user?.name && !!order.paidAt &&
+    order.paidAt >= activeShift.openedAt && (!activeShift.closedAt || order.paidAt <= activeShift.closedAt)
+  ) : [];
+  const shiftRevenue = cashierSales.reduce((s, o) => s + (o.paidAmount ?? o.total), 0);
+  const shiftCash = cashierSales.filter((o) => o.paymentMethod === 'Tiền mặt').reduce((s, o) => s + (o.paidAmount ?? o.total), 0);
+  const shiftTransfer = cashierSales.filter((o) => o.paymentMethod === 'Chuyển khoản').reduce((s, o) => s + (o.paidAmount ?? o.total), 0);
+  const shiftCard = cashierSales.filter((o) => o.paymentMethod === 'Thẻ').reduce((s, o) => s + (o.paidAmount ?? o.total), 0);
   const expectedCash=(activeShift?.openingCash??0)+shiftCash;
 
   const lines = selected ? submittedLines(selected) : [];
@@ -80,7 +99,10 @@ export function Cashier() {
   const waiting = lines.filter((l) => billableQty(l) > 0 && l.status !== 'READY');
   const ready = selected ? isReadyToPay(selected) : false;
   const cashNum = Number(cash) || 0;
-  const cashOk = method !== 'Tiền mặt' || cashNum >= totals.total;
+  const amountToCollect = allowDebt ? (paidNow.trim() === '' ? 0 : Number(paidNow)) : totals.total;
+  const amountValid = Number.isFinite(amountToCollect) && amountToCollect >= 0 && amountToCollect <= totals.total;
+  const debtCustomerValid = amountToCollect >= totals.total || customerName.trim().length > 0;
+  const cashOk = method !== 'Tiền mặt' || amountToCollect === 0 || cashNum >= amountToCollect;
   const quick = [totals.total, Math.ceil(totals.total / 100_000) * 100_000, Math.ceil(totals.total / 500_000) * 500_000].
   filter((v, i, a) => a.indexOf(v) === i);
 
@@ -89,32 +111,51 @@ export function Cashier() {
     const paid = payOrder(selected.id, {
       discountRate,
       method,
-      cashReceived: method === 'Tiền mặt' ? cashNum : undefined
+      cashReceived: method === 'Tiền mặt' ? cashNum : undefined,
+      amountPaid: amountToCollect,
+      customerName,
+      customerPhone
     });
     if (paid) {
       setInvoice(paid);
-      showToast(`Đã thanh toán ${paid.id} — đã trừ định lượng nguyên liệu`);
+      showToast(paid.debtAmount ? `Đã xác nhận bill ${paid.id}; ghi công nợ ${formatVnd(paid.debtAmount)}` : `Đã thanh toán ${paid.id} — đã trừ định lượng nguyên liệu`);
       setSelectedId(null);
     }
   };
 
+  const closeShift = () => {
+    if (!activeShift) return;
+    if (actualCash.trim() === '') { setShiftError('Nhập số tiền mặt thực tế đang có trong két.'); return; }
+    const error = closeCashierShift(activeShift.id, Number(actualCash), varianceReason, {
+      cash: shiftCash, transfer: shiftTransfer, other: shiftCard
+    });
+    setShiftError(error ?? '');
+    if (!error) {
+      setActualCash('');
+      setVarianceReason('');
+    }
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {!activeShift ? <div className="m-auto w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-card"><h2 className="text-xl font-bold">Mở ca thu ngân</h2><p className="mt-1 text-sm text-slate-500">Nhập số tiền mặt thực tế trong két. Cần mở ca trước khi thanh toán.</p><div className="mt-4 space-y-3"><Field label="Tiền mặt đầu ca"><input className={inputClass} type="number" min="0" value={openingCash} onChange={e=>setOpeningCash(e.target.value)}/></Field><Field label="Ghi chú"><textarea className={inputClass} value={openingNote} onChange={e=>setOpeningNote(e.target.value)}/></Field>{shiftError&&<p className="text-sm text-red-600">{shiftError}</p>}<Button onClick={()=>{const err=openCashierShift(Number(openingCash),openingNote);setShiftError(err??'');}}>Xác nhận mở ca</Button></div></div> : <>
+    <div className="flex min-h-full flex-col">
+      {!activeShift && screen !== 'shift' ? <div className="m-auto w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-card"><h2 className="text-xl font-bold">Chưa mở ca thu ngân</h2><p className="mt-1 text-sm text-slate-500">Mở ca tại chức năng Chốt ca trước khi thanh toán.</p><Link to="/cashier?screen=shift"><Button className="mt-4">Đi đến Chốt ca</Button></Link></div> : <>
+      {screen === 'shift' ? <section className="m-auto w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
+        <h1 className="text-xl font-bold">Chốt ca thu ngân</h1>
+        {!activeShift ? anotherOpenShift ? <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Thu ngân {anotherOpenShift.cashier} đang mở ca {anotherOpenShift.id}. Chốt ca đó trước khi mở ca mới.</p> : <><p className="mt-1 text-sm text-slate-500">Nhập tiền mặt đầu ca để bắt đầu ca làm việc.</p><div className="mt-5 space-y-3"><Field label="Tiền mặt đầu ca"><input className={inputClass} type="number" min="0" value={openingCash} onChange={e=>setOpeningCash(e.target.value)}/></Field><Field label="Ghi chú"><textarea className={inputClass} value={openingNote} onChange={e=>setOpeningNote(e.target.value)}/></Field>{shiftError&&<p className="text-sm text-red-600">{shiftError}</p>}<Button onClick={startShift}>Xác nhận mở ca</Button></div></> : <><p className="mt-1 text-sm text-slate-500">Ca {activeShift.id} · Mở lúc {new Date(activeShift.openedAt).toLocaleString('vi-VN')}</p><div className="mt-5 space-y-3 text-sm"><p>Thu ngân: <strong>{user?.name}</strong></p><p>Tiền mặt đầu ca: <strong>{formatVnd(activeShift.openingCash)}</strong></p><p>Doanh thu tiền mặt: <strong>{formatVnd(shiftCash)}</strong></p><p>Chuyển khoản: <strong>{formatVnd(shiftTransfer)}</strong> · Phương thức khác: <strong>{formatVnd(shiftCard)}</strong></p><p>Tiền mặt dự kiến cuối ca: <strong>{formatVnd(expectedCash)}</strong></p><Field label="Tiền mặt thực tế kiểm đếm trong két"><input className={inputClass} type="number" min="0" value={actualCash} onChange={e=>setActualCash(e.target.value)}/></Field><p>Chênh lệch: <strong>{formatVnd((Number(actualCash)||0)-expectedCash)}</strong></p><Field label="Lý do chênh lệch (bắt buộc nếu khác 0)"><textarea className={inputClass} value={varianceReason} onChange={e=>setVarianceReason(e.target.value)}/></Field>{shiftError&&<p role="alert" className="text-red-600">{shiftError}</p>}<Button variant="warning" onClick={closeShift}>Xác nhận chốt ca và gửi báo cáo</Button></div></>}
+      </section> : <>
       <div className="flex flex-wrap items-center gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 lg:gap-6">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Thu ngân</h1>
-          <p className="text-xs text-slate-500">Thanh toán sẽ tự động trừ định lượng nguyên liệu theo công thức</p>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Sơ đồ bàn</h1>
+          <p className="text-xs text-slate-500">{tables.filter((table) => open.some((order) => order.tableId === table.id)).length}/{tables.length} bàn đang có khách · Chọn bàn để xem order và xác nhận thanh toán</p>
         </div>
         <div className="ml-auto flex w-full flex-wrap items-center justify-between gap-3 sm:w-auto sm:justify-start">
-          <label className="text-xs text-slate-500">Ngày ca<input aria-label="Ngày ca cần xem" type="date" value={salesDate} onChange={(e) => setSalesDate(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800" /></label>
           <dl className="flex w-full justify-between gap-3 text-sm sm:w-auto sm:gap-6 lg:gap-8">
           <div>
-            <dt className="text-xs text-slate-500">Doanh số ca · {user?.name}</dt>
+            <dt className="text-xs text-slate-500">Tiền đã thu trong ca · {user?.name}</dt>
             <dd className="tabular font-semibold text-slate-900">{formatVnd(shiftRevenue)}</dd>
           </div>
           <div>
-            <dt className="text-xs text-slate-500">Hóa đơn đã thu</dt>
+            <dt className="text-xs text-slate-500">Bill đã xác nhận</dt>
             <dd className="tabular font-semibold text-slate-900">{cashierSales.length}</dd>
           </div>
           <div>
@@ -122,9 +163,8 @@ export function Cashier() {
             <dd className="tabular font-semibold text-slate-900">{open.length}</dd>
           </div>
           </dl>
-          <div className="w-full text-xs text-slate-500">Ca {activeShift.id} · Đầu ca {formatVnd(activeShift.openingCash)} · Tiền mặt {formatVnd(shiftCash)} · Chuyển khoản {formatVnd(shiftTransfer)} · Thẻ {formatVnd(shiftCard)} · Dự kiến trong két {formatVnd(expectedCash)}</div>
+          <div className="w-full text-xs text-slate-500">Ca {activeShift?.id} · Đầu ca {formatVnd(activeShift?.openingCash ?? 0)} · Tiền mặt {formatVnd(shiftCash)} · Chuyển khoản {formatVnd(shiftTransfer)} · Thẻ {formatVnd(shiftCard)} · Dự kiến trong két {formatVnd(expectedCash)}</div>
         </div>
-        <Button variant="warning" onClick={()=>setCloseOpen(true)}>Chốt ca</Button>
         <Link to="/invoices">
           <Button variant="secondary">
             <ScrollTextIcon className="h-4 w-4" />
@@ -134,15 +174,6 @@ export function Cashier() {
         <Link to="/reports">
           <Button variant="secondary"><BarChart3Icon className="h-4 w-4" /> Báo cáo</Button>
         </Link>
-      </div>
-
-      <div className="flex gap-2 border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
-        <Button variant={screen === 'payment' ? 'primary' : 'secondary'} onClick={() => setScreen('payment')}>
-          <CreditCardIcon className="h-4 w-4" /> Order & thanh toán
-        </Button>
-        <Button variant={screen === 'available' ? 'primary' : 'secondary'} onClick={() => setScreen('available')}>
-          <PackageCheckIcon className="h-4 w-4" /> Món có sẵn <span className="ml-1 rounded-full bg-white/20 px-1.5">{availableLines.length}</span>
-        </Button>
       </div>
 
       {screen === 'available' ? (
@@ -158,61 +189,41 @@ export function Cashier() {
             ))}</div>}
         </section>
       ) : (
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {/* Danh sách bàn */}
-        <aside className="max-h-52 w-full shrink-0 overflow-y-auto scroll-thin border-b border-slate-200 bg-white lg:max-h-none lg:w-80 lg:border-b-0 lg:border-r">
-          {open.length === 0 ?
-          <div className="px-6 py-16 text-center">
-              <WalletIcon className="mx-auto h-8 w-8 text-slate-300" />
-              <p className="mt-3 text-sm font-medium text-slate-600">Không có bàn chờ thanh toán</p>
-            </div> :
+      <>
+      {!showPayment && <div className="bg-slate-50 px-5 py-6 sm:px-6">
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          {areas.map((area) => {
+            const areaTables = tables.filter((table) => table.areaId === area.id);
+            const occupied = areaTables.filter((table) => open.some((order) => order.tableId === table.id)).length;
+            return <button key={area.id} onClick={() => setAreaId(area.id)} className={`rounded-full px-4 py-2 text-sm ${areaId === area.id ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100'}`}>
+              {area.name} <span className={`ml-1 text-xs ${areaId === area.id ? 'text-slate-300' : 'text-slate-400'}`}>{occupied}/{areaTables.length}</span>
+            </button>;
+          })}
+          <div className="ml-auto flex items-center gap-4 text-xs text-slate-500"><span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full border border-slate-300 bg-white"/>Trống</span><span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-brand-600"/>Có khách</span></div>
+        </div>
 
-          <ul className="divide-y divide-slate-100">
-              {open.map((o) => {
-              const sl = submittedLines(o);
-              const readyCount = sl.filter((l) => l.status === 'READY').length;
-              const canPay = isReadyToPay(o);
-              const active = selected?.id === o.id;
-              return (
-                <li key={o.id}>
-                    <button
-                    onClick={() => setSelectedId(o.id)}
-                    className={`w-full px-5 py-4 text-left transition-colors duration-150 ease-out ${
-                    active ? 'bg-brand-50' : 'hover:bg-slate-50'}`
-                    }>
-                    
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold text-slate-900">{tableOf(o.tableId)?.name}</span>
-                        <span className="tabular text-sm font-semibold text-slate-900">
-                          {formatVnd(orderTotals(sl).total)}
-                        </span>
-                      </div>
-                      <p className="tabular mt-0.5 text-xs text-slate-500">
-                        {o.id} · {minutesSince(o.createdAt)} phút
-                      </p>
-                      <div className="mt-2 flex items-center gap-2">
-                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                          <div
-                          className={`h-full rounded-full ${canPay ? 'bg-emerald-500' : 'bg-brand-500'}`}
-                          style={{ width: `${readyCount / sl.length * 100}%` }} />
-                        
-                        </div>
-                        <span className="tabular text-[11px] text-slate-500">{readyCount}/{sl.length}</span>
-                      </div>
-                      {canPay &&
-                    <Badge tone="green" className="mt-2">Sẵn sàng thanh toán</Badge>
-                    }
-                    </button>
-                  </li>);
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
+          {(tables.filter((table) => table.areaId === areaId).length === 0) ? <p className="py-10 text-center text-sm text-slate-500">Khu vực chưa có bàn.</p> :
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+              {tables.filter((table) => table.areaId === areaId).map((table) => {
+                const order = open.find((item) => item.tableId === table.id);
+                const busy = !!order;
+                const selectedTable = selected?.tableId === table.id;
+                const items = order ? submittedLines(order).reduce((sum, line) => sum + billableQty(line), 0) : 0;
+                return <button key={table.id} disabled={!order} onClick={() => { if (order) { setSelectedId(order.id); setShowPayment(true); } }} className={`flex aspect-[0.9/1] flex-col justify-between rounded-xl border-2 p-4 text-left transition-colors ${busy ? `border-brand-600 bg-brand-600 text-white hover:bg-brand-700 ${selectedTable ? 'ring-4 ring-brand-200' : ''}` : 'cursor-default border-dashed border-slate-300 bg-white text-slate-700'}`}>
+                  <div className="flex items-start justify-between gap-2"><span className="text-lg font-semibold">{table.name}</span><span className={`flex items-center gap-1 text-xs ${busy ? 'text-brand-100' : 'text-slate-400'}`}><UsersIcon className="h-3.5 w-3.5"/>{table.seats}</span></div>
+                  <div><p className="text-sm font-medium">{busy ? 'Có khách' : 'Trống'}</p><p className={`text-xs ${busy ? 'text-brand-100' : 'text-slate-400'}`}>{busy ? `${minutesSince(order!.createdAt)} phút · ${items} món` : 'Chưa có order'}</p>{busy && <p className="mt-1 text-xs font-medium">{isReadyToPay(order!) ? 'Sẵn sàng thanh toán' : 'Đang chờ chế biến'}</p>}</div>
+                </button>;
+              })}
+            </div>}
+        </div>
 
-            })}
-            </ul>
-          }
-        </aside>
+      </div>}
 
-        {/* Chi tiết hóa đơn */}
-        {selected ?
-        <div className="flex min-w-0 flex-1 flex-col bg-slate-50 lg:flex-row">
+      {showPayment && selected ?
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-slate-50 p-5 sm:p-6">
+          <Button variant="secondary" className="mb-4 self-start" onClick={() => setShowPayment(false)}><ArrowLeftIcon className="h-4 w-4"/>Quay lại sơ đồ bàn</Button>
+          <div className="flex min-w-0 flex-1 flex-col bg-slate-50 lg:flex-row">
             <section className="flex min-w-0 flex-1 flex-col">
               <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
                 <div>
@@ -301,15 +312,30 @@ export function Cashier() {
                   </div>
                 </dl>
 
+                <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+                  <input type="checkbox" checked={allowDebt} onChange={(event) => { setAllowDebt(event.target.checked); setPaidNow(event.target.checked ? String(totals.total) : ''); }} className="mt-0.5 accent-amber-600" />
+                  <span><strong className="block text-amber-900">Ghi nợ / thanh toán một phần</strong><span className="mt-0.5 block text-xs leading-5 text-amber-800">Bill vẫn được xác nhận; số còn thiếu sẽ tự tạo công nợ gắn với mã hóa đơn.</span></span>
+                </label>
+
+                {allowDebt && <div className="mt-3 rounded-lg border border-slate-200 p-3">
+                  <label className="mb-1.5 block text-xs font-medium text-slate-600" htmlFor="paid-now">Số tiền thu ngay</label>
+                  <input id="paid-now" type="number" min="0" max={totals.total} step="1000" value={paidNow} onChange={(event) => setPaidNow(event.target.value)} className={inputClass + ' text-right font-semibold'} />
+                  {!amountValid && <p className="mt-1 text-xs text-red-600">Số tiền thu không được vượt tổng bill.</p>}
+                  {amountValid && <p className="mt-1 flex justify-between text-xs text-amber-800"><span>Ghi công nợ</span><strong>{formatVnd(totals.total - amountToCollect)}</strong></p>}
+                  {amountToCollect < totals.total && <div className="mt-3 grid gap-2 sm:grid-cols-2"><label className="text-xs font-medium text-slate-600">Tên khách hàng *<input className={inputClass + ' mt-1'} value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Nhập tên người nợ" /></label><label className="text-xs font-medium text-slate-600">Số điện thoại<input className={inputClass + ' mt-1'} value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} placeholder="Không bắt buộc" /></label></div>}
+                </div>}
+
                 <div>
                   <p className="mb-2 text-xs font-medium text-slate-600">Phương thức thanh toán</p>
                   <div className="grid grid-cols-3 gap-2">
                     {METHODS.map((mt) =>
                   <button
                     key={mt.id}
+                    disabled={allowDebt && mt.id === 'Thẻ'}
+                    title={allowDebt && mt.id === 'Thẻ' ? 'Ghi nợ hiện chỉ hỗ trợ tiền mặt hoặc chuyển khoản' : undefined}
                     onClick={() => setMethod(mt.id)}
                     className={`flex flex-col items-center gap-1 rounded-lg border px-2 py-2.5 text-xs font-medium transition-colors duration-150 ease-out ${
-                    method === mt.id ?
+                    allowDebt && mt.id === 'Thẻ' ? 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300' : method === mt.id ?
                     'border-brand-600 bg-brand-50 text-brand-700' :
                     'border-slate-200 text-slate-600 hover:bg-slate-50'}`
                     }>
@@ -348,7 +374,7 @@ export function Cashier() {
                     {cashNum > 0 &&
                 <p className={`tabular mt-2 flex justify-between text-sm ${cashOk ? 'text-emerald-700' : 'text-red-600'}`}>
                         <span>{cashOk ? 'Tiền thối' : 'Còn thiếu'}</span>
-                        <span className="font-semibold">{formatVnd(Math.abs(cashNum - totals.total))}</span>
+                        <span className="font-semibold">{formatVnd(Math.abs(cashNum - amountToCollect))}</span>
                       </p>
                 }
                   </div>
@@ -358,7 +384,7 @@ export function Cashier() {
               <div className="rounded-lg bg-slate-50 p-4 text-center text-xs text-slate-600">
                     <QrCodeIcon className="mx-auto h-16 w-16 text-slate-800" />
                     <p className="mt-2">VietQR · Sen Vàng · 0071 000 668 899</p>
-                    <p className="tabular font-semibold text-slate-900">{formatVnd(totals.total)}</p>
+                    <p className="tabular font-semibold text-slate-900">Thu ngay: {formatVnd(amountToCollect)}</p>
                   </div>
               }
               </div>
@@ -372,28 +398,24 @@ export function Cashier() {
                 <Button
                 size="lg"
                 className="w-full"
-                disabled={!ready || !cashOk}
+                disabled={!ready || !cashOk || !amountValid || !debtCustomerValid}
                 onClick={pay}>
                 
                   <CheckCircle2Icon className="h-5 w-5" />
-                  Xác nhận thanh toán
+                  {allowDebt && totals.total - amountToCollect > 0 ? 'Xác nhận bill & ghi công nợ' : 'Xác nhận thanh toán'}
                 </Button>
               </div>
             </aside>
-          </div> :
+          </div></div> :
 
-        <div className="flex flex-1 items-center justify-center bg-slate-50 text-sm text-slate-500">
-            Chọn một bàn để xem hóa đơn
-          </div>
+        <div className="flex flex-1 items-center justify-center bg-slate-50" />
         }
-      </div>
+      </>
       )}
 
       <InvoiceModal order={invoice} title="Thanh toán thành công" onClose={() => setInvoice(null)} />
       <InvoiceModal order={provisional} provisional onClose={() => setProvisional(null)} />
-      <Modal open={closeOpen} onClose={()=>setCloseOpen(false)} title="Chốt ca thu ngân" description={`Ca ${activeShift.id} · Mở lúc ${new Date(activeShift.openedAt).toLocaleString('vi-VN')}`} footer={<><Button variant="secondary" onClick={()=>setCloseOpen(false)}>Hủy</Button><Button onClick={()=>{const err=closeCashierShift(activeShift.id,Number(actualCash),varianceReason,{cash:shiftCash,transfer:shiftTransfer,other:shiftCard});setShiftError(err??'');if(!err)setCloseOpen(false);}}>Xác nhận chốt ca</Button></>}>
-        <div className="space-y-3 text-sm"><p>Thu ngân: <strong>{user?.name}</strong></p><p>Tiền mặt đầu ca: <strong>{formatVnd(activeShift.openingCash)}</strong></p><p>Doanh thu tiền mặt: <strong>{formatVnd(shiftCash)}</strong></p><p>Chuyển khoản: {formatVnd(shiftTransfer)} · Phương thức khác: {formatVnd(shiftCard)}</p><p>Tiền mặt dự kiến cuối ca: <strong>{formatVnd(expectedCash)}</strong></p><Field label="Tiền mặt thực tế kiểm đếm"><input className={inputClass} type="number" min="0" value={actualCash} onChange={e=>setActualCash(e.target.value)}/></Field><p>Chênh lệch: {formatVnd((Number(actualCash)||0)-expectedCash)}</p><Field label="Lý do chênh lệch (bắt buộc nếu khác 0)"><textarea className={inputClass} value={varianceReason} onChange={e=>setVarianceReason(e.target.value)}/></Field>{shiftError&&<p className="text-red-600">{shiftError}</p>}</div>
-      </Modal>
+      </>}
       </>}
     </div>);
 

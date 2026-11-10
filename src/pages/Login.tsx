@@ -14,7 +14,8 @@ import {
 import { Button } from '../components/ui/Button';
 import { Field, inputClass } from '../components/ui/Field';
 import { ROLE_HOME, useAuth } from '../contexts/AuthContext';
-import { readAdminAccounts } from './Admin';
+import { useApp } from '../contexts/AppContext';
+import { normalizeLoginName, readAdminAccounts } from './Admin';
 import type { Role } from '../types';
 
 const ROLE_INFO: Record<
@@ -33,6 +34,7 @@ const ROLE_INFO: Record<
 export function Login() {
   const accounts = readAdminAccounts();
   const { login } = useAuth();
+  const { cashierShifts } = useApp();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -54,8 +56,12 @@ export function Login() {
         setError(err);
         return;
       }
-      const acc = accounts.find((a) => a.username === u.trim().toLowerCase());
-      navigate(acc ? ROLE_HOME[acc.role] : '/', { replace: true });
+      const loginName = normalizeLoginName(u);
+      const acc = accounts.find((a) => normalizeLoginName(a.username) === loginName || normalizeLoginName(a.name) === loginName);
+      const destination = acc?.role === 'Thu ngân'
+        ? cashierShifts.some((shift) => shift.cashier === acc.name && shift.status === 'OPEN') ? '/cashier' : '/cashier?screen=shift'
+        : acc ? ROLE_HOME[acc.role] : '/';
+      navigate(destination, { replace: true });
     }, 350);
   };
 
@@ -101,12 +107,12 @@ export function Login() {
               submit();
             }}>
             
-            <Field label="Tài khoản">
+            <Field label="Tên đăng nhập hoặc họ tên">
               <input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
-                placeholder="vd: quanly"
+                placeholder="vd: nguyenminhquan hoặc Nguyễn Minh Quân"
                 className={inputClass} />
               
             </Field>
@@ -169,8 +175,9 @@ export function Login() {
                       <span className="flex-1 truncate text-xs text-slate-500">
                         {info.desc}
                       </span>
-                      <span className="font-mono text-xs text-slate-400">
-                        {a.username}
+                      <span className="flex-1 truncate text-right">
+                        <span className="block text-sm font-medium text-slate-800">{a.name}</span>
+                        <span className="font-mono text-[11px] text-slate-400">{a.username}</span>
                       </span>
                     </button>
                   </li>);

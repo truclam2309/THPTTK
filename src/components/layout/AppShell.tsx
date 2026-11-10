@@ -15,7 +15,7 @@ export function AppShell() {
       <Sidebar mobileOpen={menuOpen} onNavigate={() => setMenuOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenuClick={() => setMenuOpen((open) => !open)} />
-        <main className="app-main flex-1 overflow-y-auto scroll-thin">
+        <main className="app-main min-h-0 flex-1 overflow-y-auto scroll-thin">
           <Outlet />
         </main>
       </div>

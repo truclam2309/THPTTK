@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
 import type { Account, Role } from '../types';
-import { readAdminAccounts, recordDemoLogin } from '../pages/Admin';
+import { normalizeLoginName, readAdminAccounts, recordDemoLogin } from '../pages/Admin';
 
 type SessionUser = Omit<Account, 'password'>;
 
@@ -27,12 +27,11 @@ export function AuthProvider({ children }: {children: React.ReactNode;}) {
   const [user, setUser] = useState<SessionUser | null>(readSession);
 
   const login = useCallback((username: string, password: string) => {
-    const accountName = username.trim().toLowerCase();
+    const loginName = normalizeLoginName(username);
+    const acc = readAdminAccounts().find((a) => normalizeLoginName(a.username) === loginName || normalizeLoginName(a.name) === loginName);
+    const accountName = acc?.username ?? loginName;
     if ((JSON.parse(window.localStorage.getItem('bepkho.admin.locked') || '[]') as string[]).includes(accountName)) { recordDemoLogin({username: accountName, at: new Date().toISOString(), status: 'Bị khóa'}); return 'Tài khoản đã bị khóa'; }
-    const acc = readAdminAccounts().find(
-      (a) => a.username === username.trim().toLowerCase()
-    );
-    if (!acc) { recordDemoLogin({username: username.trim().toLowerCase(), at: new Date().toISOString(), status: 'Thất bại'}); return 'Tài khoản không tồn tại'; }
+    if (!acc) { recordDemoLogin({username: loginName, at: new Date().toISOString(), status: 'Thất bại'}); return 'Tài khoản không tồn tại'; }
     if (acc.password !== password) { recordDemoLogin({username: acc.username, role: acc.role, at: new Date().toISOString(), status: 'Thất bại'}); return 'Mật khẩu không đúng'; }
     recordDemoLogin({username: acc.username, role: acc.role, at: new Date().toISOString(), status: 'Thành công'});
     const session = { username: acc.username, name: acc.name, role: acc.role };
@@ -67,6 +66,6 @@ export const ROLE_HOME: Record<Role, string> = {
   'Nhân viên kho': '/inventory',
   'Phục vụ': '/tables',
   Bếp: '/kitchen',
-  'Thu ngân': '/cashier',
+  'Thu ngân': '/tables',
   'Kế toán': '/accountant'
 };

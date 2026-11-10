@@ -2,6 +2,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState } from
@@ -21,6 +22,8 @@ import type {
   CashierShift,
   CashLedger,
   CashVoucher,
+  DebtRecord,
+  CashVoucherMethod,
   ReportKind,
   ReportRecord,
   ReportStockLine,
@@ -72,6 +75,9 @@ interface AppState {
   saveStocktakeDraft: (record: Omit<StocktakeRecord,'id'|'createdAt'|'createdBy'|'department'|'status'|'history'>, id?: string) => string | null;
   cashierShifts: CashierShift[];
   cashLedger: CashLedger;
+  debts: DebtRecord[];
+  createPayableFromReceipt: (sourceTxId: string, dueDate: string) => string | null;
+  settleDebt: (debtId: string, amount: number, method: CashVoucherMethod) => string | null;
   createCashVoucher: (draft: Omit<CashVoucher, 'id'|'createdBy'|'createdAt'|'status'>) => string | null;
   openCashierShift: (openingCash: number, note: string) => string | null;
   closeCashierShift: (shiftId: string, actualCash: number, reason: string, sales: {cash: number;transfer: number;other: number}) => string | null;
@@ -115,7 +121,7 @@ interface AppState {
   // Thu ngân
   payOrder: (
   orderId: string,
-  opts: {discountRate: number;method: PaymentMethod;cashReceived?: number;})
+  opts: {discountRate: number;method: PaymentMethod;cashReceived?: number;amountPaid?: number;customerName?: string;customerPhone?: string;})
   => Order | null;
   // Tra cứu
   ingredientOf: (id: string) => Ingredient;
@@ -126,6 +132,7 @@ interface AppState {
 const Ctx = createContext<AppState | null>(null);
 
 const CASH_LEDGER_KEY = 'bepkho.cashLedger.v1';
+const DEBT_RECORDS_KEY = 'bepkho.debtRecords.v1';
 const makeDemoCashLedger = (): CashLedger => {
   const now = new Date();
   const vouchers: CashVoucher[] = [];
@@ -140,6 +147,18 @@ const makeDemoCashLedger = (): CashLedger => {
       { id:`PC-DEMO-${base}-02`, type:'PAYMENT', date:date(20), partyType:'Nhân viên', partyName:'Nhân viên nhà hàng (demo)', category:'Chi phí lương nhân viên', reason:'Chi lương kỳ demo', description:'Phiếu chi demo; chưa liên kết bảng lương', amount:2_000_000, method:'Tiền mặt', createdBy:'Nguyễn Thu Trang', createdAt:date(20), status:'Đã xác nhận', accountingTreatment:'CASH_ONLY', demo:true }
     );
   }
+  seedOrders.filter((order) => order.demo && (order.debtAmount ?? 0) > 0 && (order.paidAmount ?? 0) > 0).forEach((order) => {
+    const date = order.paidAt ?? order.createdAt;
+    vouchers.push({ id:`PT-CN-${order.id}`, type:'RECEIPT', date, partyType:'Khách hàng', partyName:`Khách bàn ${order.tableId} (demo)`, category:'Thu một phần hóa đơn', reason:`Thu tiền bill ${order.id}`, description:`Khoản thu ban đầu · công nợ CN-${order.id}`, amount:order.paidAmount!, method:order.paymentMethod === 'Chuyển khoản' ? 'Chuyển khoản' : 'Tiền mặt', ...(order.paymentMethod === 'Chuyển khoản' ? {bankAccount:'Tài khoản demo · VCB'} : {}), debtId:`CN-${order.id}`, sourceDocumentId:order.id, createdBy:'Thu ngân demo', createdAt:date, status:'Đã xác nhận', accountingTreatment:'CASH_ONLY', demo:true });
+  });
+  initialTx.filter((tx) => tx.type === 'NHẬP KHO').slice(0, 4).forEach((tx, index) => {
+    const paid = index === 0 ? Math.round(tx.value * 0.45) : index === 1 ? tx.value : 0;
+    if (!paid) return;
+    const batch = seedBatches.find((item) => item.id === tx.batchId);
+    const supplier = seedSuppliers.find((item) => item.id === batch?.supplierId);
+    const date = tx.at;
+    vouchers.push({ id:`PC-CN-${tx.id}`, type:'PAYMENT', date, partyType:'Nhà cung cấp', partyName:`${supplier?.name ?? 'Nhà cung cấp'} (demo)`, category:'Thanh toán công nợ', reason:`Thanh toán phiếu nhập ${tx.batchId}`, description:`Khoản trả ban đầu · công nợ CN-${tx.id}`, amount:paid, method:'Chuyển khoản', bankAccount:'Tài khoản demo · VCB', debtId:`CN-${tx.id}`, sourceDocumentId:tx.id, createdBy:'Kế toán demo', createdAt:date, status:'Đã xác nhận', accountingTreatment:'CASH_ONLY', demo:true });
+  });
   return { vouchers, openingCash:20_000_000, openingBank:100_000_000, bankAccountName:'Tài khoản demo · VCB', closedPeriods:[] };
 };
 function readCashLedger(): CashLedger {
@@ -148,13 +167,67 @@ function readCashLedger(): CashLedger {
     const stored = window.localStorage.getItem(CASH_LEDGER_KEY);
     if (!stored) { window.localStorage.setItem(CASH_LEDGER_KEY, JSON.stringify(demo)); return demo; }
     const parsed = JSON.parse(stored) as Partial<CashLedger>;
-    return { ...demo, ...parsed, vouchers: Array.isArray(parsed.vouchers) ? parsed.vouchers : demo.vouchers, closedPeriods: Array.isArray(parsed.closedPeriods) ? parsed.closedPeriods : [] };
+    const savedVouchers = Array.isArray(parsed.vouchers) ? parsed.vouchers : [];
+    const mergedVouchers = [...savedVouchers, ...demo.vouchers.filter((voucher) => !savedVouchers.some((saved) => saved.id === voucher.id))];
+    return { ...demo, ...parsed, vouchers: mergedVouchers, closedPeriods: Array.isArray(parsed.closedPeriods) ? parsed.closedPeriods : [] };
   } catch { return demo; }
+}
+function initialDebtRecords(): DebtRecord[] {
+  const demoReceivables: DebtRecord[] = seedOrders.filter((order) => order.demo && (order.debtAmount ?? 0) > 0).map((order) => ({
+    id: `CN-${order.id}`, side: 'receivable', sourceType: 'SALES_INVOICE', sourceId: order.id,
+    party: `Khách bàn ${order.tableId} (demo)`, sourceLabel: `Bill thanh toán ${order.id}`,
+    date: order.paidAt?.slice(0, 10) ?? order.createdAt.slice(0, 10), dueDate: order.debtDueDate ?? order.paidAt?.slice(0, 10) ?? order.createdAt.slice(0, 10),
+    amount: order.total, paid: order.paidAmount ?? order.total - (order.debtAmount ?? 0), payments: (order.paidAmount ?? 0) > 0 ? [{ id: `PT-CN-${order.id}`, voucherId:`PT-CN-${order.id}`, date: order.paidAt?.slice(0, 10) ?? order.createdAt.slice(0, 10), amount: order.paidAmount!, method: order.paymentMethod === 'Chuyển khoản' ? 'Chuyển khoản' : order.paymentMethod === 'Thẻ' ? 'Thẻ' : 'Tiền mặt' }] : [], demo: true
+  }));
+  const demoPayables: DebtRecord[] = initialTx.filter((tx) => tx.type === 'NHẬP KHO').slice(0, 4).map((tx, index) => {
+    const batch = seedBatches.find((item) => item.id === tx.batchId);
+    const supplier = seedSuppliers.find((item) => item.id === batch?.supplierId);
+    const at = new Date(tx.at);
+    const due = new Date(at.getTime() + (index % 2 === 0 ? 12 : 30) * 86_400_000);
+    const paid = index === 0 ? Math.round(tx.value * 0.45) : index === 1 ? tx.value : 0;
+    return { id: `CN-${tx.id}`, side: 'payable', sourceType: 'GOODS_RECEIPT', sourceId: tx.id, party: `${supplier?.name ?? 'Nhà cung cấp'} (demo)`, sourceLabel: `Phiếu nhập ${tx.batchId}`, date: at.toISOString().slice(0, 10), dueDate: due.toISOString().slice(0, 10), amount: tx.value, paid, payments: paid ? [{ id: `PC-CN-${tx.id}`, voucherId:`PC-CN-${tx.id}`, date: at.toISOString().slice(0, 10), amount: paid, method: 'Chuyển khoản' }] : [], demo: true };
+  });
+  return [...demoReceivables, ...demoPayables];
+}
+function readDebtRecords(): DebtRecord[] {
+  try {
+    const raw = window.localStorage.getItem(DEBT_RECORDS_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw) as DebtRecord[];
+      const migrated = saved.map((debt) => ({ ...debt, payments: debt.payments.map((payment) => ({
+        ...payment,
+        voucherId: payment.voucherId ?? (debt.demo ? `${debt.side === 'receivable' ? 'PT' : 'PC'}-CN-${debt.sourceId}` : payment.id)
+      })) }));
+      if (JSON.stringify(saved) !== JSON.stringify(migrated)) window.localStorage.setItem(DEBT_RECORDS_KEY, JSON.stringify(migrated));
+      return migrated;
+    }
+    const initial = initialDebtRecords();
+    window.localStorage.setItem(DEBT_RECORDS_KEY, JSON.stringify(initial));
+    return initial;
+  } catch { return initialDebtRecords(); }
 }
 
 let counter = 100;
 const uid = (prefix: string) => `${prefix}-${++counter}`;
 let orderSeq = 1055;
+const readOrders = (): Order[] => {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem('bepkho.orders.v1') || '[]') as Order[];
+    if (!Array.isArray(stored)) return seedOrders;
+    const orders = new Map(seedOrders.map((order) => [order.id, order]));
+    stored.forEach((order) => { if (order && typeof order.id === 'string') orders.set(order.id, order); });
+    return [...orders.values()];
+  } catch { return seedOrders; }
+};
+const readStoredRows = <T extends { id: string }>(key: string, seeds: T[]): T[] => {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(key) || '[]') as T[];
+    if (!Array.isArray(stored)) return seeds;
+    const rows = new Map(seeds.map((row) => [row.id, row]));
+    stored.forEach((row) => { if (row && typeof row.id === 'string') rows.set(row.id, row); });
+    return [...rows.values()];
+  } catch { return seeds; }
+};
 
 export function AppProvider({ children }: {children: React.ReactNode;}) {
   const { user } = useAuth();
@@ -163,10 +236,13 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
 
   const [ingredients, setIngredients] = useState<Ingredient[]>(seedIngredients);
   const [suppliers] = useState<Supplier[]>(seedSuppliers);
-  const [batches, setBatches] = useState<Batch[]>(seedBatches);
+  const [batches, setBatches] = useState<Batch[]>(() => readStoredRows('bepkho.batches.v1', seedBatches));
   const [dishes, setDishes] = useState<Dish[]>(seedDishes);
-  const [orders, setOrders] = useState<Order[]>(seedOrders);
-  const [transactions, setTransactions] = useState<StockTx[]>(initialTx);
+  const [orders, setOrders] = useState<Order[]>(readOrders);
+  useEffect(() => { try { window.localStorage.setItem('bepkho.orders.v1', JSON.stringify(orders)); } catch { /* keep current session state when storage is unavailable */ } }, [orders]);
+  const [transactions, setTransactions] = useState<StockTx[]>(() => readStoredRows('bepkho.transactions.v1', initialTx));
+  useEffect(() => { try { window.localStorage.setItem('bepkho.batches.v1', JSON.stringify(batches)); } catch { /* keep current session state when storage is unavailable */ } }, [batches]);
+  useEffect(() => { try { window.localStorage.setItem('bepkho.transactions.v1', JSON.stringify(transactions)); } catch { /* keep current session state when storage is unavailable */ } }, [transactions]);
   const [purchaseRequests, setPurchaseRequests] = useState<PurchaseRequest[]>(() => {
     try { return JSON.parse(window.localStorage.getItem('bepkho.purchaseRequests') || '[]') as PurchaseRequest[]; }
     catch { return []; }
@@ -175,6 +251,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
   const [cashierShifts,setCashierShifts]=useState<CashierShift[]>(()=>{try{return JSON.parse(window.localStorage.getItem('bepkho.cashierShifts')||'[]') as CashierShift[]}catch{return[]}});
   const [cashLedger, setCashLedger] = useState<CashLedger>(readCashLedger);
   const cashLedgerRef = useRef(cashLedger);
+  const [debts, setDebts] = useState<DebtRecord[]>(readDebtRecords);
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [areas, setAreas] = useState<Area[]>(seedAreas);
   const [tables, setTables] = useState<DiningTable[]>(seedTables);
@@ -214,6 +291,56 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
     return null;
   }, [user, showToast]);
 
+  const createPayableFromReceipt = useCallback((sourceTxId: string, dueDate: string) => {
+    if (!user || user.role !== 'Kế toán') return 'Chỉ kế toán được lập công nợ';
+    const source = transactions.find((tx) => tx.id === sourceTxId && tx.type === 'NHẬP KHO');
+    if (!source) return 'Chọn phiếu nhập kho hợp lệ làm chứng từ gốc';
+    if (!dueDate || Number.isNaN(new Date(`${dueDate}T00:00:00`).getTime())) return 'Chọn hạn thanh toán hợp lệ';
+    if (debts.some((debt) => debt.sourceId === source.id && debt.side === 'payable')) return 'Phiếu nhập này đã được ghi nhận công nợ';
+    const batch = batches.find((item) => item.id === source.batchId);
+    const supplier = suppliers.find((item) => item.id === batch?.supplierId);
+    if (!supplier) return 'Không tìm thấy nhà cung cấp của phiếu nhập';
+    if (!Number.isFinite(source.value) || source.value <= 0) return 'Giá trị phiếu nhập phải lớn hơn 0 để ghi công nợ';
+    const record: DebtRecord = { id:`CN-${source.id}`, side:'payable', sourceType:'GOODS_RECEIPT', sourceId:source.id, party:supplier.name, sourceLabel:`Phiếu nhập ${source.batchId}`, date:source.at.slice(0,10), dueDate, amount:source.value, paid:0, payments:[] };
+    const next = [record, ...debts];
+    try { window.localStorage.setItem(DEBT_RECORDS_KEY, JSON.stringify(next)); }
+    catch { return 'Không lưu được công nợ vào bộ nhớ trình duyệt'; }
+    setDebts(next);
+    showToast(`Đã lập công nợ từ phiếu nhập ${source.batchId}`);
+    return null;
+  }, [user, transactions, debts, batches, suppliers, showToast]);
+
+  const settleDebt = useCallback((debtId: string, amount: number, method: CashVoucherMethod) => {
+    if (!user || user.role !== 'Kế toán') return 'Chỉ kế toán được ghi nhận thanh toán công nợ';
+    const debt = debts.find((item) => item.id === debtId);
+    if (!debt) return 'Không tìm thấy khoản công nợ';
+    const remaining = debt.amount - debt.paid;
+    if (!Number.isFinite(amount) || amount <= 0 || amount > remaining) return `Số tiền phải lớn hơn 0 và không vượt quá ${Math.max(0, remaining).toLocaleString('vi-VN')} ₫`;
+    const date = new Date().toISOString();
+    if (cashLedgerRef.current.closedPeriods.includes(date.slice(0,7))) return 'Kỳ kế toán đã khóa sổ';
+    const ledger = cashLedgerRef.current;
+    const bankAccount = method === 'Chuyển khoản' ? ledger.bankAccountName : undefined;
+    const balance = method === 'Tiền mặt'
+      ? ledger.openingCash + ledger.vouchers.filter((voucher) => voucher.method === 'Tiền mặt').reduce((sum, voucher) => sum + (voucher.type === 'RECEIPT' ? voucher.amount : -voucher.amount), 0)
+      : ledger.openingBank + ledger.vouchers.filter((voucher) => voucher.method === 'Chuyển khoản' && voucher.bankAccount === bankAccount).reduce((sum, voucher) => sum + (voucher.type === 'RECEIPT' ? voucher.amount : -voucher.amount), 0);
+    const isReceipt = debt.side === 'receivable';
+    if (!isReceipt && amount > balance) return `Số dư ${method.toLowerCase()} không đủ (${Math.round(balance).toLocaleString('vi-VN')} ₫)`;
+    const voucher: CashVoucher = { id:`${isReceipt?'PT':'PC'}-${Date.now()}-${++counter}`, type:isReceipt?'RECEIPT':'PAYMENT', date, partyType:isReceipt?'Khách hàng':'Nhà cung cấp', partyName:debt.party, category:isReceipt?'Thu hồi công nợ':'Thanh toán công nợ', reason:`Thanh toán công nợ ${debt.id}`, description:`${isReceipt?'Thu':'Chi'} đợt này cho chứng từ ${debt.sourceId}`, amount, method, bankAccount, debtId:debt.id, sourceDocumentId:debt.sourceId, createdBy:user.name, createdAt:date, status:'Đã xác nhận', accountingTreatment:'CASH_ONLY' };
+    const nextLedger: CashLedger = { ...ledger, vouchers:[voucher, ...ledger.vouchers] };
+    const nextDebts = debts.map((item) => item.id === debt.id ? { ...item, paid:item.paid + amount, payments:[...item.payments, { id:voucher.id, voucherId:voucher.id, date:date.slice(0,10), amount, method }] } : item);
+    try {
+      window.localStorage.setItem(CASH_LEDGER_KEY, JSON.stringify(nextLedger));
+      window.localStorage.setItem(DEBT_RECORDS_KEY, JSON.stringify(nextDebts));
+    } catch {
+      try { window.localStorage.setItem(CASH_LEDGER_KEY, JSON.stringify(ledger)); } catch { /* preserve original state where possible */ }
+      return 'Không lưu được giao dịch; công nợ và số dư chưa thay đổi';
+    }
+    cashLedgerRef.current = nextLedger; setCashLedger(nextLedger); setDebts(nextDebts);
+    if (debt.side === 'receivable') setOrders((prev) => prev.map((order) => order.id === debt.sourceId ? { ...order, paidAmount: (order.paidAmount ?? debt.paid) + amount, debtAmount: Math.max(0, debt.amount - debt.paid - amount) } : order));
+    showToast(`Đã ghi nhận ${isReceipt?'thu hồi':'thanh toán'} ${amount.toLocaleString('vi-VN')} ₫`);
+    return null;
+  }, [user, debts, showToast]);
+
   const processPurchaseRequest = useCallback((id: string, status: Exclude<PurchaseRequestStatus, 'PENDING'>, reason = '') => {
     if (!user) return 'Vui lòng đăng nhập';
     if ((status === 'REJECTED' || status === 'REVISION_REQUESTED') && !reason.trim()) return 'Vui lòng nhập lý do';
@@ -224,7 +351,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
     if (!managerAction && user.role !== 'Kế toán') return 'Chỉ kế toán được tiếp nhận và xử lý nghiệp vụ ngân sách';
     if (status === 'ACCOUNTING_PENDING' && request.status !== 'MANAGER_APPROVED') return 'Phiếu phải được quản lý phê duyệt trước';
     if (status === 'COMPLETED' && request.status !== 'ACCOUNTING_PENDING') return 'Kế toán cần tiếp nhận phiếu trước khi hoàn tất';
-    if (status === 'APPROVED' && request.status !== 'ACCOUNTING_PENDING') return 'Chỉ tiếp nhận phiếu đã được quản lý phê duyệt';
+    if (status === 'APPROVED' && request.status !== 'ACCOUNTING_PENDING' && !(request.status === 'PENDING' && user.role === 'Kế toán')) return 'Kế toán có thể duyệt phiếu đang chờ hoặc tiếp nhận phiếu đã được quản lý phê duyệt';
     if ((status === 'REJECTED' || status === 'REVISION_REQUESTED') && !['PENDING','MANAGER_APPROVED','ACCOUNTING_PENDING'].includes(request.status)) return 'Phiếu không ở trạng thái có thể xử lý';
     if (status === 'REJECTED' && request.requester === user.name && user.role === 'Quản lý') return 'Người lập không được tự phê duyệt phiếu';
     const updated = purchaseRequests.map((item) => item.id !== id ? item : {
@@ -261,7 +388,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
   const openCashierShift=useCallback((openingCash:number,note:string)=>{
     if(!user||user.role!=='Thu ngân')return 'Chỉ thu ngân được mở ca';
     if(!Number.isFinite(openingCash)||openingCash<0)return 'Tiền mặt đầu ca không hợp lệ';
-    if(cashierShifts.some(s=>s.cashier===user.name&&s.status==='OPEN'))return 'Bạn đã có ca đang hoạt động';
+    if(cashierShifts.some(s=>s.status==='OPEN'))return 'Đang có ca thu ngân mở. Hãy chốt ca hiện tại trước khi mở ca mới';
     const shift:CashierShift={id:`CA-${Date.now()}`,cashier:user.name,openedAt:new Date().toISOString(),openingCash,note:note.trim(),status:'OPEN'};
     const next=[shift,...cashierShifts];setCashierShifts(next);window.localStorage.setItem('bepkho.cashierShifts',JSON.stringify(next));showToast(`Đã mở ca ${shift.id}`);return null;
   },[user,cashierShifts,showToast]);
@@ -843,7 +970,7 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
   const payOrder = useCallback(
     (
     orderId: string,
-    opts: {discountRate: number;method: PaymentMethod;cashReceived?: number;}) =>
+    opts: {discountRate: number;method: PaymentMethod;cashReceived?: number;amountPaid?: number;customerName?: string;customerPhone?: string;}) =>
     {
       if (!hasRole('Thu ngân')) return null;
       if (!cashierShifts.some((shift) => shift.cashier === userName && shift.status === 'OPEN')) { showToast('Mở ca thu ngân trước khi thanh toán'); return null; }
@@ -852,7 +979,11 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
       if (opts.discountRate < 0 || opts.discountRate > 15) return null;
       const lines = submittedLines(order);
       const totals = orderTotals(lines, opts.discountRate);
-      if (opts.method === 'Tiền mặt' && (opts.cashReceived ?? 0) < totals.total) return null;
+      const amountPaid = opts.amountPaid ?? totals.total;
+      if (!Number.isFinite(amountPaid) || amountPaid < 0 || amountPaid > totals.total) { showToast('Số tiền thu phải nằm trong khoảng từ 0 đến tổng bill'); return null; }
+      if (amountPaid < totals.total && !opts.customerName?.trim()) { showToast('Nhập tên khách hàng để ghi nhận công nợ'); return null; }
+      if (amountPaid < totals.total && opts.method === 'Thẻ') { showToast('Ghi nợ hiện chỉ hỗ trợ thu tiền mặt hoặc chuyển khoản'); return null; }
+      if (opts.method === 'Tiền mặt' && (opts.cashReceived ?? 0) < amountPaid) { showToast('Tiền khách đưa chưa đủ số tiền thu ngay'); return null; }
 
       const needs = lines.flatMap((l) => {
         const dish = dishes.find((d) => d.id === l.dishId);
@@ -883,10 +1014,34 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
         paidBy: userName,
         paymentMethod: opts.method,
         cashReceived: opts.cashReceived,
+        paidAmount: amountPaid,
+        debtAmount: Math.max(0, totals.total - amountPaid),
+        debtDueDate: amountPaid < totals.total ? new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10) : undefined,
+        customerName: opts.customerName?.trim() || undefined,
+        customerPhone: opts.customerPhone?.trim() || undefined,
         discountRate: opts.discountRate,
         ...totals,
         cost: result.cost
       };
+
+      if (paidOrder.debtAmount && !debts.some((debt) => debt.sourceType === 'SALES_INVOICE' && debt.sourceId === paidOrder.id)) {
+        const date = paidOrder.paidAt!.slice(0,10);
+        const debtId = `CN-${paidOrder.id}`;
+        const voucher = amountPaid > 0 ? { id:`PT-${Date.now()}-${++counter}`, type:'RECEIPT' as const, date:paidOrder.paidAt!, partyType:'Khách hàng' as const, partyName:paidOrder.customerName!, category:'Thu một phần hóa đơn', reason:`Thu tiền bill ${paidOrder.id}`, description:`Khoản thu ban đầu · công nợ ${debtId}`, amount:amountPaid, method:opts.method as CashVoucherMethod, ...(opts.method === 'Chuyển khoản' ? {bankAccount:cashLedgerRef.current.bankAccountName} : {}), debtId, sourceDocumentId:paidOrder.id, createdBy:userName, createdAt:paidOrder.paidAt!, status:'Đã xác nhận' as const, accountingTreatment:'CASH_ONLY' as const } : undefined;
+        const debt: DebtRecord = { id:debtId, side:'receivable', sourceType:'SALES_INVOICE', sourceId:paidOrder.id, party:paidOrder.customerName!, contact:paidOrder.customerPhone, sourceLabel:`Bill thanh toán ${paidOrder.id}`, date, dueDate:paidOrder.debtDueDate!, amount:totals.total, paid:amountPaid, payments:amountPaid ? [{ id:voucher?.id ?? `PAY-${paidOrder.id}`, voucherId:voucher?.id, date, amount:amountPaid, method:opts.method }] : [] };
+        const nextDebts = [debt, ...debts];
+        const previousLedger = cashLedgerRef.current;
+        const nextLedger = voucher ? { ...previousLedger, vouchers:[voucher, ...previousLedger.vouchers] } : previousLedger;
+        try {
+          window.localStorage.setItem(DEBT_RECORDS_KEY, JSON.stringify(nextDebts));
+          if (voucher) window.localStorage.setItem(CASH_LEDGER_KEY, JSON.stringify(nextLedger));
+        } catch {
+          try { window.localStorage.setItem(DEBT_RECORDS_KEY, JSON.stringify(debts)); window.localStorage.setItem(CASH_LEDGER_KEY, JSON.stringify(previousLedger)); } catch { /* best-effort rollback */ }
+          showToast('Không lưu được công nợ hoặc phiếu thu; bill chưa được xác nhận'); return null;
+        }
+        setDebts((prev) => [debt, ...prev]);
+        if (voucher) { cashLedgerRef.current = nextLedger; setCashLedger(nextLedger); }
+      }
 
       setBatches(result.batches);
       setTransactions((prev) => [...result.txs, ...prev]);
@@ -900,12 +1055,12 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
       setOrders((prev) => prev.map((o) => o.id === orderId ? paidOrder : o));
       return paidOrder;
     },
-    [orders, dishes, batches, ingredients, userName, hasRole, showToast, cashierShifts]
+    [orders, dishes, batches, ingredients, userName, hasRole, showToast, cashierShifts, debts]
   );
 
   const value = useMemo<AppState>(
     () => ({
-      ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
+      ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, debts, createPayableFromReceipt, settleDebt, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
       dailyStats, baseline: baselineToday, dishSold, userName, toast, showToast,
       receiveStock, disposeBatch, recordWaste, saveIngredient, createReport, toggleSpecial, saveDish, deleteDish,
       saveRecipe, saveArea, deleteArea, saveTable, deleteTable, openOrderOf, addLine,
@@ -913,11 +1068,11 @@ export function AppProvider({ children }: {children: React.ReactNode;}) {
       ingredientOf, dishOf, tableOf
     }),
     [
-    ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
+    ingredients, batches, dishes, suppliers, orders, transactions, purchaseRequests, processPurchaseRequest, createPurchaseRequest, stocktakes, createStocktake, saveStocktakeDraft, cashierShifts, cashLedger, debts, createPayableFromReceipt, settleDebt, createCashVoucher, openCashierShift, closeCashierShift, processCashierShift, reports, areas, tables,
     dishSold, userName, toast, showToast, receiveStock, disposeBatch, recordWaste, saveIngredient, createReport,
     toggleSpecial, saveDish, deleteDish, saveRecipe, saveArea, deleteArea, saveTable,
     deleteTable, openOrderOf, addLine, updateLine, removeLine, submitOrder,
-    startCooking, finishLine, completeDirectSale, cancelLine, payOrder, ingredientOf, dishOf, tableOf]
+    startCooking, finishLine, completeDirectSale, cancelLine, payOrder, createPayableFromReceipt, settleDebt, ingredientOf, dishOf, tableOf]
 
   );
 

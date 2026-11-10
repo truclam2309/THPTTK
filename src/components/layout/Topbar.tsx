@@ -51,7 +51,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   });
 
   return (
-    <header className="app-topbar flex h-16 shrink-0 items-center gap-3 border-b border-slate-200/80 bg-white/95 px-4 backdrop-blur md:gap-4 md:px-6">
+    <header className="app-topbar flex h-16 shrink-0 items-center gap-3 border-b border-slate-200/80 bg-white px-4 md:gap-4 md:px-6">
       <button onClick={onMenuClick} aria-label="Mở menu" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 md:hidden">
         <MenuIcon className="h-5 w-5" />
       </button>
