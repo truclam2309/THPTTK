@@ -1,15 +1,17 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BellIcon, MenuIcon, SearchIcon } from 'lucide-react';
+import { BellIcon, ChevronDownIcon, MenuIcon, SearchIcon, UserCircle } from 'lucide-react';
 import { useApp } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMetrics } from '../../hooks/useMetrics';
 import { countdownLabel } from '../../utils/inventory';
+import { navGroups } from '../../data/navigation';
 
 export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const { ingredientOf } = useApp();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const location = useLocation();
   const m = useMetrics();
   const [open, setOpen] = useState(false);
   const seesStock = user?.role === 'Quản lý' || user?.role === 'Nhân viên kho';
@@ -18,6 +20,20 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   slice(-2).
   map((w) => w[0]).
   join('');
+
+  const allItems = navGroups.flatMap((group) => group.items);
+  const currentItem = allItems
+    .filter((item) =>
+      item.to === location.pathname ||
+      (item.to !== '/' && location.pathname.startsWith(`${item.to}/`)),
+    )
+    .sort((a, b) => b.to.length - a.to.length)[0];
+  const pageTitle = currentItem?.label ?? 'Tổng quan';
+  const permittedItems = allItems.filter((item) => user && item.roles.includes(user.role));
+  const quickActions = [
+    permittedItems.find((item) => /sơ đồ bàn/i.test(item.label)),
+    permittedItems.find((item) => /nhập hàng|phiếu nhập/i.test(item.label)),
+  ].filter((item, index, items) => item && items.findIndex((candidate) => candidate?.to === item.to) === index);
 
   const alerts = !seesStock ? [] : [
   ...m.expired.map((b) => ({
@@ -51,20 +67,35 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   });
 
   return (
-    <header className="app-topbar flex h-16 shrink-0 items-center gap-3 border-b border-slate-200/80 bg-white px-4 md:gap-4 md:px-6">
-      <button onClick={onMenuClick} aria-label="Mở menu" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 md:hidden">
-        <MenuIcon className="h-5 w-5" />
-      </button>
-      <div className="relative hidden max-w-md flex-1 md:block">
+    <header className="app-topbar sticky top-0 z-30 flex h-16 w-full shrink-0 items-center justify-between border-b border-slate-200 px-4 sm:px-6">
+      <div className="flex min-w-0 items-center gap-3">
+        <button onClick={onMenuClick} aria-label="Mở menu" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-blue-600 md:hidden">
+          <MenuIcon className="h-5 w-5" />
+        </button>
+        <h1 className="truncate text-base font-semibold tracking-tight text-slate-800">{pageTitle}</h1>
+      </div>
+
+      <div className="ml-3 flex shrink-0 items-center gap-2 sm:gap-3">
+        {quickActions.map((item) => {
+          if (!item) return null;
+          const Icon = item.icon;
+          return (
+            <NavLink key={item.to} to={item.to} className="hidden h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 lg:inline-flex">
+              <Icon size={16} />
+              <span>{item.label}</span>
+            </NavLink>
+          );
+        })}
+
+        <div className="relative hidden w-56 xl:block">
         <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input
           type="search"
           placeholder="Tìm nguyên liệu, mã lô, mã barcode, món ăn…"
-          className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 transition-colors duration-150 ease-out focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100" />
-        
-      </div>
+          className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 transition-colors focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100" />
+        </div>
 
-      <p className="ml-auto hidden text-sm text-slate-500 lg:block">{today}</p>
+        <p className="hidden text-sm text-slate-500 2xl:block">{today}</p>
 
       <div className={`relative ${seesStock ? '' : 'hidden'}`}>
         <button
@@ -124,18 +155,26 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         </AnimatePresence>
       </div>
 
-      <div className="flex items-center gap-2.5 border-l border-slate-200 pl-4">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">
-          {initials}
+      <div className="hidden h-7 w-px bg-slate-200 sm:block" />
+      <details className="group relative">
+        <summary title={user?.role ?? 'Tài khoản'} className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-2 py-1.5 transition-colors hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-100">
+            {initials || <UserCircle size={20} />}
+          </div>
+          <div className="hidden text-left sm:block">
+            <p className="max-w-[130px] truncate text-xs font-semibold text-slate-700">{user?.name ?? 'Tài khoản'}</p>
+            <p className="max-w-[130px] truncate text-[11px] text-slate-400">{user?.role}</p>
+          </div>
+          <ChevronDownIcon size={15} className="hidden text-slate-400 transition-transform group-open:rotate-180 sm:block" />
+        </summary>
+        <div className="absolute right-0 top-full z-50 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-lg shadow-slate-900/10">
+          <div className="border-b border-slate-100 px-3 py-2">
+            <p className="truncate text-xs font-semibold text-slate-700">{user?.name}</p>
+            <p className="mt-0.5 truncate text-xs text-slate-500">{user?.role}</p>
+          </div>
+          <button type="button" onClick={logout} className="mt-1 flex min-h-10 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600">Đăng xuất</button>
         </div>
-        <div className="hidden sm:block">
-          <p className="text-sm font-medium leading-tight text-slate-900">
-            {user?.name}
-          </p>
-          <p className="text-[11px] leading-tight text-slate-500">
-            {user?.role}
-          </p>
-        </div>
+      </details>
       </div>
     </header>);
 

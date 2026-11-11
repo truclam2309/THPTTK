@@ -11,12 +11,14 @@ export function AppShell() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div className="flex h-full min-h-0 w-full bg-slate-100">
+    <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-[#F5F8FF] text-slate-800">
       <Sidebar mobileOpen={menuOpen} onNavigate={() => setMenuOpen(false)} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar onMenuClick={() => setMenuOpen((open) => !open)} />
-        <main className="app-main min-h-0 flex-1 overflow-y-auto scroll-thin">
-          <Outlet />
+        <main className="app-main min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-thin">
+          <div className="mx-auto w-full max-w-[1600px]">
+            <Outlet />
+          </div>
         </main>
       </div>
 
